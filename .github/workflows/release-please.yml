@@ -12,12 +12,10 @@ jobs:
     runs-on: macos-26
     permissions: {}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install Tuist
-        run: |
-          curl -Ls https://install.tuist.io | bash
-          tuist version
+        run: brew install tuist
 
       - name: Generate Xcode project
         run: tuist generate --no-open
@@ -39,7 +37,7 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@a02a34c4d625f9be7cb89156071d8567f4485f42 # v4.2.0
+      - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4
         id: release
 
   build:
@@ -52,12 +50,10 @@ jobs:
     env:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install Tuist
-        run: |
-          curl -Ls https://install.tuist.io | bash
-          tuist version
+        run: brew install tuist
 
       - name: Generate Xcode project
         env:
