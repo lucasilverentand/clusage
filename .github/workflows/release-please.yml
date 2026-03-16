@@ -4,15 +4,15 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
+# Minimal default permissions — jobs override as needed
+permissions: {}
 
 jobs:
   test:
     runs-on: macos-26
+    permissions: {}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install Tuist
         run: |
@@ -32,21 +32,27 @@ jobs:
 
   release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@a02a34c4d625f9be7cb89156071d8567f4485f42 # v4.2.0
         id: release
 
   build:
     needs: [test, release-please]
     if: needs.release-please.outputs.release_created
     runs-on: macos-26
+    environment: release
+    permissions:
+      contents: write
     env:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install Tuist
         run: |
@@ -98,7 +104,6 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
-          # Create a zip for notarization submission
           ditto -c -k --keepParent build/export/Clusage.app build/Clusage-notarize.zip
 
           xcrun notarytool submit build/Clusage-notarize.zip \
@@ -107,7 +112,6 @@ jobs:
             --team-id "$APPLE_TEAM_ID" \
             --wait
 
-          # Staple the ticket directly to the .app bundle
           xcrun stapler staple build/export/Clusage.app
 
           rm build/Clusage-notarize.zip
