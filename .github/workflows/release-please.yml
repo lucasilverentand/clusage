@@ -98,7 +98,7 @@ jobs:
           codesign --force --deep --options runtime \
             --sign "Developer ID Application" \
             --entitlements ClusageWidgets.entitlements \
-            build/export/Clusage.app/Contents/PlugIns/ClusageWidgets.appex
+            build/export/Clusage.app/Contents/Extensions/ClusageWidgets.appex
 
           codesign --force --options runtime \
             --sign "Developer ID Application" \

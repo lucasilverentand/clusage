@@ -50,12 +50,12 @@ let project = Project(
         .target(
             name: "ClusageWidgets",
             destinations: .macOS,
-            product: .appExtension,
+            product: .extensionKitExtension,
             bundleId: "studio.seventwo.clusage.widgets",
             deploymentTargets: .macOS("26.0"),
             infoPlist: .extendingDefault(with: [
-                "NSExtension": [
-                    "NSExtensionPointIdentifier": "com.apple.widgetkit-extension",
+                "EXAppExtensionAttributes": [
+                    "EXExtensionPointIdentifier": "com.apple.widgetkit-extension",
                 ],
             ]),
             sources: ["Widgets/**", "Shared/**"],
