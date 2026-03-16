@@ -1,0 +1,12 @@
+pre-commit:
+  parallel: true
+  commands:
+    trufflehog:
+      run: trufflehog git file://. --since-commit HEAD --no-update --fail 2>/dev/null
+      fail_text: "TruffleHog detected secrets in staged changes"
+
+pre-push:
+  commands:
+    trufflehog:
+      run: trufflehog git file://. --since-commit {push_remote_sha} --no-update --fail 2>/dev/null
+      fail_text: "TruffleHog detected secrets in commits being pushed"

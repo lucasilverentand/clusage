@@ -1,0 +1,179 @@
+import Foundation
+
+@MainActor @Observable
+final class AccountsViewModel {
+    let accountStore: AccountStore
+    var newAccountName = ""
+    var newAccountToken = ""
+    /// Keychain service name of the selected credential (if any).
+    var selectedKeychainServiceName: String?
+    var error: String?
+    var isValidating = false
+
+    /// All Claude Code credentials found in the Keychain.
+    var detectedCredentials: [DetectedCredential] = []
+
+    /// IDs of credentials selected for import.
+    var selectedCredentialIDs: Set<UUID> = []
+
+    /// Whether we're currently importing selected credentials.
+    var isImporting = false
+
+    /// Number of accounts successfully imported in the last batch.
+    var importedCount = 0
+
+    /// Called after accounts are successfully added/imported so the poller can fetch data immediately.
+    var onAccountsAdded: (() -> Void)?
+
+    init(accountStore: AccountStore) {
+        self.accountStore = accountStore
+    }
+
+    var accounts: [Account] {
+        accountStore.accounts
+    }
+
+    var hasDetectedCredentials: Bool {
+        !detectedCredentials.isEmpty
+    }
+
+    /// Validates the token against the API, then saves the account.
+    /// The account must be linked to a keychain entry — if none was selected, we auto-detect
+    /// which keychain credential holds this token.
+    func addAccount() async {
+        let name = newAccountName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = newAccountToken.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !name.isEmpty, !token.isEmpty else {
+            error = "Name and token are required."
+            Log.accounts.warning("addAccount called with empty name or token")
+            return
+        }
+
+        Log.accounts.info("Adding account '\(name)' — validating token (length: \(token.count))")
+        isValidating = true
+        error = nil
+
+        do {
+            _ = try await APIClient.shared.validateToken(token)
+            let profile = try await APIClient.shared.fetchProfile(token: token)
+
+            // Resolve keychain binding: use selected credential, or auto-detect by matching token
+            var keychainService = selectedKeychainServiceName
+            if keychainService == nil {
+                let allCredentials = KeychainManager.detectAllClaudeCodeCredentials()
+                keychainService = allCredentials.first(where: { $0.accessToken == token })?.serviceName
+                if let service = keychainService {
+                    Log.accounts.info("Auto-detected keychain entry '\(service)' for manual token")
+                }
+            }
+
+            accountStore.addAccount(
+                name: name,
+                token: token,
+                profile: Profile(from: profile),
+                keychainServiceName: keychainService
+            )
+            Log.accounts.info("Account '\(name)' added successfully (keychain: \(keychainService ?? "none"))")
+            newAccountName = ""
+            newAccountToken = ""
+            selectedKeychainServiceName = nil
+            error = nil
+            onAccountsAdded?()
+        } catch {
+            Log.accounts.error("Failed to add account '\(name)': \(error.localizedDescription)")
+            self.error = error.localizedDescription
+        }
+
+        isValidating = false
+    }
+
+    func removeAccount(_ account: Account) {
+        accountStore.removeAccount(account)
+    }
+
+    /// Discover all Claude Code credentials from the Keychain, then enrich with profile info.
+    func detectCredentials() async {
+        var credentials = KeychainManager.detectAllClaudeCodeCredentials()
+
+        // Fetch profile for each credential to get email
+        for i in credentials.indices {
+            do {
+                let profile = try await APIClient.shared.fetchProfile(token: credentials[i].accessToken)
+                credentials[i].email = profile.account.email
+            } catch {
+                Log.accounts.warning("Could not fetch profile for '\(credentials[i].serviceName)': \(error.localizedDescription)")
+            }
+        }
+
+        detectedCredentials = credentials
+        // Select all by default
+        selectedCredentialIDs = Set(credentials.map(\.id))
+    }
+
+    func toggleCredential(_ credential: DetectedCredential) {
+        if selectedCredentialIDs.contains(credential.id) {
+            selectedCredentialIDs.remove(credential.id)
+        } else {
+            selectedCredentialIDs.insert(credential.id)
+        }
+    }
+
+    /// Select a specific detected credential to fill the manual form.
+    func selectCredential(_ credential: DetectedCredential) {
+        newAccountToken = credential.accessToken
+        newAccountName = credential.label
+        selectedKeychainServiceName = credential.serviceName
+    }
+
+    /// Import only the selected detected credentials as accounts.
+    func importSelected() async {
+        let toImport = detectedCredentials.filter { selectedCredentialIDs.contains($0.id) }
+        Log.accounts.info("importSelected called — \(toImport.count) credential(s) selected")
+        guard !toImport.isEmpty else {
+            error = "No accounts selected."
+            return
+        }
+
+        isImporting = true
+        error = nil
+        importedCount = 0
+
+        // Deduplicate credentials that share the same token
+        // (Claude Code may store the same OAuth token under multiple keychain entries)
+        var seenTokens: Set<String> = []
+        let uniqueImports = toImport.filter { seenTokens.insert($0.accessToken).inserted }
+        if uniqueImports.count < toImport.count {
+            Log.accounts.info("Filtered \(toImport.count - uniqueImports.count) duplicate token(s)")
+        }
+
+        for credential in uniqueImports {
+            do {
+                // validateToken hits usage endpoint — confirms the token works
+                _ = try await APIClient.shared.validateToken(credential.accessToken)
+                let profile = try await APIClient.shared.fetchProfile(token: credential.accessToken)
+                let name = profile.account.email
+                accountStore.addAccount(
+                    name: name,
+                    token: credential.accessToken,
+                    profile: Profile(from: profile),
+                    keychainServiceName: credential.serviceName
+                )
+                importedCount += 1
+                Log.accounts.info("Imported credential '\(credential.label)' as '\(name)'")
+            } catch {
+                Log.accounts.warning("Skipping credential '\(credential.label)': \(error.localizedDescription)")
+            }
+        }
+
+        isImporting = false
+
+        if importedCount > 0 {
+            onAccountsAdded?()
+        }
+
+        if importedCount == 0 {
+            self.error = "Selected tokens could not be validated. They may have expired."
+        }
+    }
+}
