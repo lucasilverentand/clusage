@@ -85,15 +85,28 @@ jobs:
             -scheme Clusage \
             -configuration Release \
             -archivePath build/Clusage.xcarchive \
-            CODE_SIGN_IDENTITY="Developer ID Application" \
-            CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=NO \
             ENABLE_HARDENED_RUNTIME=YES
 
-      - name: Export app
+      - name: Export and sign app
         run: |
           mkdir -p build/export
           cp -R build/Clusage.xcarchive/Products/Applications/Clusage.app build/export/
+
+          # Sign the widgets extension first, then the main app (inside-out)
+          codesign --force --deep --options runtime \
+            --sign "Developer ID Application" \
+            --entitlements ClusageWidgets.entitlements \
+            build/export/Clusage.app/Contents/PlugIns/ClusageWidgets.appex
+
+          codesign --force --options runtime \
+            --sign "Developer ID Application" \
+            --entitlements Clusage.entitlements \
+            build/export/Clusage.app
+
+          # Verify the signature
+          codesign --verify --deep --strict build/export/Clusage.app
 
       - name: Notarize app
         env:
