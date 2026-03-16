@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/seventwo-studio/clusage/compare/v0.1.1...v0.1.2) (2026-03-16)
+
+
+### Bug Fixes
+
+* build unsigned then codesign manually for CI ([37845a3](https://github.com/seventwo-studio/clusage/commit/37845a3f555f5952f4d13414f2cc5e8a39382745))
+
 ## [0.1.1](https://github.com/seventwo-studio/clusage/compare/v0.1.0...v0.1.1) (2026-03-16)
 
 
