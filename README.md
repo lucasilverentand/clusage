@@ -41,26 +41,7 @@
 
 ## ClaudeLine Integration
 
-Clusage writes usage data to `~/.claude/clusage-api.json`, which [ClaudeLine](https://github.com/nicekid1/claudeline) reads automatically. This means ClaudeLine doesn't need to hit the Anthropic API directly — Clusage is the single source of truth.
-
-Available ClaudeLine components:
-
-| Component | Description | Example |
-|-----------|-------------|---------|
-| `usage:5h` | 5-hour utilization | `42%` |
-| `usage:7d` | 7-day utilization | `58%` |
-| `usage:5h-reset` | Time until 5h reset | `3h 32m` |
-| `usage:7d-reset` | Time until 7d reset | `2d 5h` |
-| `usage:5h-bar` | 5h progress bar | `H▰▰▱▱▱▱` |
-| `usage:7d-bar` | 7d progress bar | `W▰▰▰▱▱` |
-| `usage:velocity` | Usage velocity | `2.3 pp/hr` |
-| `usage:intensity` | Intensity level | `moderate` |
-| `usage:eta` | ETA to ceiling | `1h 23m` |
-| `usage:7d-granular` | Interpolated 7-day | `46.3%` |
-| `usage:7d-projected` | Projected at reset | `62%` |
-| `usage:budget` | Daily budget | `14.3 pp/day` |
-| `usage:budget-status` | Pacing status | `on_track` |
-| `account:email` | Account email | `you@example.com` |
+Clusage integrates with [ClaudeLine](https://github.com/nicekid1/claudeline) by writing usage data to `~/.claude/clusage-api.json`. ClaudeLine picks this up automatically — no extra configuration needed.
 
 ## Building from Source
 
