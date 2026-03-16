@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.3](https://github.com/seventwo-studio/clusage/compare/v0.1.2...v0.1.3) (2026-03-16)
+
+
+### Features
+
+* proper DMG with Applications symlink and updated actions ([5570bb0](https://github.com/seventwo-studio/clusage/commit/5570bb017fcbab0a03d2daf107e48db12ca21249))
+
+
+### Bug Fixes
+
+* use ExtensionKit extension type for macOS widget ([8b775ba](https://github.com/seventwo-studio/clusage/commit/8b775ba3b3412bb33808ad863a224b3143fe6bc5))
+
 ## [0.1.2](https://github.com/seventwo-studio/clusage/compare/v0.1.1...v0.1.2) (2026-03-16)
 
 
