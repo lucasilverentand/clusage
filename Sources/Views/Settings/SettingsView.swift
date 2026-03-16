@@ -7,6 +7,8 @@ struct SettingsView: View {
     var historyStore: UsageHistoryStore?
     var streakStore: StreakStore?
     var poller: UsagePoller?
+    var updateChecker: UpdateChecker?
+    var hotkeyManager: HotkeyManager?
 
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var showingResetData = false
@@ -41,6 +43,98 @@ struct SettingsView: View {
                             launchAtLogin = SMAppService.mainApp.status == .enabled
                         }
                     }
+            }
+
+            // MARK: - Keyboard Shortcut
+
+            if let hotkeyManager {
+                Section("Keyboard Shortcut") {
+                    HStack {
+                        Text("Toggle Dashboard")
+                        Spacer()
+                        if hotkeyManager.isRecording {
+                            Text("Press keys…")
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                        } else {
+                            Text(hotkeyManager.hotkeyDescription)
+                                .font(.body.monospaced())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                        }
+                    }
+                    .onKeyPress { keyPress in
+                        guard hotkeyManager.isRecording else { return .ignored }
+                        // Map KeyPress to an NSEvent-compatible representation
+                        // onKeyPress gives us the key equivalent but not the raw keyCode,
+                        // so we use the local monitor in HotkeyManager instead.
+                        return .ignored
+                    }
+
+                    HStack {
+                        Button(hotkeyManager.isRecording ? "Cancel" : "Record Shortcut") {
+                            hotkeyManager.isRecording.toggle()
+                        }
+                        .font(.caption)
+
+                        Spacer()
+
+                        Text("Requires Accessibility permission for global shortcuts")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            // MARK: - Updates
+
+            if let updateChecker {
+                Section("Updates") {
+                    Toggle("Check for updates automatically", isOn: Binding(
+                        get: { updateChecker.autoCheck },
+                        set: { updateChecker.autoCheck = $0 }
+                    ))
+
+                    HStack {
+                        if let release = updateChecker.availableRelease {
+                            Label("Version \(release.version) available", systemImage: "arrow.down.circle.fill")
+                                .foregroundStyle(.blue)
+
+                            Spacer()
+
+                            Button("Skip") {
+                                updateChecker.skipCurrentUpdate()
+                            }
+                            .font(.caption)
+
+                            Button("Download") {
+                                openURL(release.htmlURL)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        } else {
+                            Text(updateChecker.isChecking ? "Checking…" : "You're up to date")
+                                .foregroundStyle(.secondary)
+
+                            Spacer()
+
+                            Button("Check Now") {
+                                Task { await updateChecker.checkForUpdate() }
+                            }
+                            .disabled(updateChecker.isChecking)
+                            .font(.caption)
+                        }
+                    }
+
+                    if let error = updateChecker.lastError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
             }
 
             // MARK: - Polling

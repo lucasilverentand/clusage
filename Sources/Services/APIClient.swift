@@ -24,7 +24,7 @@ actor APIClient {
         Log.api.debug("Fetching profile from \(url.absoluteString)")
         let (data, _) = try await perform(request: makeRequest(url: url, token: token))
         let response = try JSONDecoder().decode(ProfileResponse.self, from: data)
-        Log.api.info("Profile fetched — \(response.account.email)")
+        Log.api.info("Profile fetched — \(response.account.email, privacy: .private)")
         return response
     }
 

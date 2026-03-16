@@ -17,6 +17,14 @@
 
 ## Install
 
+### Homebrew (recommended)
+
+```bash
+brew install seventwo-studio/tap/clusage
+```
+
+### Manual Download
+
 **[Download the latest release](https://github.com/seventwo-studio/clusage/releases/latest)**
 
 1. Download `Clusage.dmg` from the latest release

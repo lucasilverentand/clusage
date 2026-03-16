@@ -2,41 +2,58 @@ import SwiftUI
 
 struct OnboardingView: View {
     @Bindable var viewModel: AccountsViewModel
+    var onSkip: (() -> Void)?
     @State private var page = 0
     @State private var showManualEntry = false
     @State private var appeared = false
     @State private var acceptedRisk = false
+    @State private var showImportSuccess = false
+
+    private let pageCount = 4
 
     var body: some View {
-        ZStack {
-            switch page {
-            case 0:
-                welcomePage
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .leading).combined(with: .opacity),
-                        removal: .move(edge: .leading).combined(with: .opacity)
-                    ))
-            case 1:
-                disclaimerPage
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal: .move(edge: .leading).combined(with: .opacity)
-                    ))
-            case 2:
-                keychainPermissionPage
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal: .move(edge: .leading).combined(with: .opacity)
-                    ))
-            default:
-                accountSetupPage
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal: .move(edge: .trailing).combined(with: .opacity)
-                    ))
+        VStack(spacing: 0) {
+            ZStack {
+                switch page {
+                case 0:
+                    welcomePage
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .leading).combined(with: .opacity),
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        ))
+                case 1:
+                    disclaimerPage
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        ))
+                case 2:
+                    keychainPermissionPage
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        ))
+                default:
+                    accountSetupPage
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .trailing).combined(with: .opacity)
+                        ))
+                }
             }
+            .animation(.smooth(duration: 0.5), value: page)
+
+            // Page indicator dots
+            HStack(spacing: 8) {
+                ForEach(0..<pageCount, id: \.self) { index in
+                    Circle()
+                        .fill(index == page ? Color.accentColor : Color.secondary.opacity(0.3))
+                        .frame(width: 6, height: 6)
+                        .animation(.easeInOut(duration: 0.2), value: page)
+                }
+            }
+            .padding(.bottom, 20)
         }
-        .animation(.smooth(duration: 0.5), value: page)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
             Rectangle()
@@ -60,17 +77,28 @@ struct OnboardingView: View {
                 header
                 howItWorks
 
-                Button {
-                    withAnimation { page = 1 }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text("Get Started")
-                        Image(systemName: "arrow.right")
+                VStack(spacing: 12) {
+                    Button {
+                        withAnimation { page = 1 }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("Get Started")
+                            Image(systemName: "arrow.right")
+                        }
+                        .frame(maxWidth: 200)
                     }
-                    .frame(maxWidth: 200)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+
+                    if onSkip != nil {
+                        Button("Skip Setup") {
+                            onSkip?()
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
             }
             .padding(48)
             .frame(maxWidth: .infinity)
@@ -273,12 +301,7 @@ struct OnboardingView: View {
 
     private var header: some View {
         VStack(spacing: 16) {
-            Image(systemName: "chart.bar.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(.white)
-                .padding(20)
-                .glassEffect(.regular.tint(.accentColor), in: Circle())
-                .accessibilityHidden(true)
+            AppIconView()
 
             Text("Welcome to Clusage")
                 .font(.largeTitle.bold())
@@ -387,19 +410,30 @@ struct OnboardingView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            if viewModel.importedCount > 0 {
-                Label(
-                    "\(viewModel.importedCount) account\(viewModel.importedCount == 1 ? "" : "s") imported",
-                    systemImage: "checkmark.circle"
-                )
-                .foregroundStyle(.green)
-                .font(.callout)
+            if showImportSuccess {
+                VStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.green)
+                        .symbolEffect(.bounce, value: showImportSuccess)
+
+                    Text("\(viewModel.importedCount) account\(viewModel.importedCount == 1 ? "" : "s") imported")
+                        .foregroundStyle(.green)
+                        .font(.callout)
+                }
                 .transition(.opacity.combined(with: .scale))
             }
 
             Button {
                 let vm = viewModel
-                Task { @MainActor in await vm.importSelected() }
+                Task { @MainActor in
+                    await vm.importSelected()
+                    if vm.importedCount > 0 {
+                        withAnimation(.spring(duration: 0.5)) {
+                            showImportSuccess = true
+                        }
+                    }
+                }
             } label: {
                 HStack(spacing: 6) {
                     if viewModel.isImporting {
@@ -477,6 +511,34 @@ struct OnboardingView: View {
             }
         }
         .frame(maxWidth: 440)
+    }
+}
+
+// MARK: - App Icon View
+
+private struct AppIconView: View {
+    @State private var iconImage: NSImage?
+
+    var body: some View {
+        Group {
+            if let iconImage {
+                Image(nsImage: iconImage)
+                    .resizable()
+                    .frame(width: 80, height: 80)
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+            } else {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.white)
+                    .padding(20)
+                    .glassEffect(.regular.tint(.accentColor), in: Circle())
+            }
+        }
+        .accessibilityHidden(true)
+        .onAppear {
+            iconImage = NSApp.applicationIconImage
+        }
     }
 }
 

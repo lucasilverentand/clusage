@@ -8,6 +8,8 @@ struct ClusageApp: App {
     @State private var streakStore = StreakStore()
     @State private var momentumProvider: MomentumProvider?
     @State private var poller: UsagePoller?
+    @State private var updateChecker = UpdateChecker()
+    @State private var hotkeyManager = HotkeyManager()
 
     @Environment(\.openWindow) private var openWindow
 
@@ -32,6 +34,11 @@ struct ClusageApp: App {
                 accountStore.refreshAllFromKeychain()
                 startPolling()
                 observeAppLifecycle()
+                updateChecker.startIfEnabled()
+                hotkeyManager.start { [openWindow] in
+                    openWindow(id: "dashboard")
+                    NSApp.activate()
+                }
             }
         }
         .menuBarExtraStyle(.window)
@@ -59,9 +66,11 @@ struct ClusageApp: App {
                 momentumProvider: momentumProvider,
                 historyStore: historyStore,
                 streakStore: streakStore,
-                poller: poller
+                poller: poller,
+                updateChecker: updateChecker,
+                hotkeyManager: hotkeyManager
             )
-            .frame(width: 480, height: 620)
+            .frame(width: 480, height: 700)
         }
     }
 

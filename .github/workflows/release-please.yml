@@ -193,3 +193,66 @@ jobs:
       - name: Clean up keychain
         if: always()
         run: security delete-keychain build.keychain 2>/dev/null || true
+
+  update-homebrew:
+    needs: [release-please, build]
+    if: needs.release-please.outputs.release_created
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Wait for release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          for i in $(seq 1 30); do
+            if gh release view "$TAG" --repo seventwo-studio/clusage --json assets -q '.assets[].name' | grep -q 'Clusage.dmg'; then
+              echo "DMG found in release assets"
+              break
+            fi
+            echo "Waiting for DMG asset... ($i/30)"
+            sleep 10
+          done
+
+      - name: Compute DMG SHA256
+        id: sha
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          gh release download "$TAG" --repo seventwo-studio/clusage --pattern 'Clusage.dmg' --dir .
+          SHA=$(sha256sum Clusage.dmg | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "SHA256: $SHA"
+
+      - name: Update Homebrew cask
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          VERSION="${TAG#v}"
+          SHA="${{ steps.sha.outputs.sha256 }}"
+
+          gh api repos/seventwo-studio/homebrew-tap/contents/Casks/clusage.rb \
+            --method PUT \
+            --field message="chore: update clusage to ${VERSION}" \
+            --field content="$(echo "cask \"clusage\" do
+            version \"${VERSION}\"
+            sha256 \"${SHA}\"
+
+            url \"https://github.com/seventwo-studio/clusage/releases/download/v#{version}/Clusage.dmg\"
+            name \"Clusage\"
+            desc \"Claude usage tracking for your menu bar\"
+            homepage \"https://github.com/seventwo-studio/clusage\"
+
+            depends_on macos: \">= :tahoe\"
+
+            app \"Clusage.app\"
+
+            zap trash: [
+              \"~/Library/Preferences/studio.seventwo.clusage.plist\",
+              \"~/Library/Application Support/studio.seventwo.clusage\",
+            ]
+          end
+          " | base64 -w 0)" \
+            --field sha="$(gh api repos/seventwo-studio/homebrew-tap/contents/Casks/clusage.rb --jq '.sha' 2>/dev/null || echo '')"
