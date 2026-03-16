@@ -18,6 +18,9 @@ build/
 # Tuist
 Derived/
 
+# Claude Code
+.claude/
+
 # macOS
 .DS_Store
 .AppleDouble
