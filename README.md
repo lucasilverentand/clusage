@@ -1,6 +1,19 @@
-# Clusage
+<p align="center">
+  <img src="Resources/Assets.xcassets/AppIcon.appiconset/icon_256x256.png" width="128" height="128" alt="Clusage app icon">
+</p>
 
-A macOS menu bar app that tracks your [Claude](https://claude.ai) API usage in real-time. Monitor your 5-hour and 7-day rate limit windows, see momentum and projections, and never get surprised by a rate limit again.
+<h1 align="center">Clusage</h1>
+
+<p align="center">
+  <strong>Claude usage tracking for your menu bar</strong><br>
+  Monitor your 5-hour and 7-day rate limit windows, see momentum and projections, and never get surprised by a rate limit again.
+</p>
+
+<p align="center">
+  <a href="https://github.com/seventwo-studio/clusage/releases/latest"><img src="https://img.shields.io/github/v/release/seventwo-studio/clusage?style=flat-square" alt="Latest Release"></a>
+  <img src="https://img.shields.io/badge/platform-macOS_26+-blue?style=flat-square" alt="macOS 26+">
+  <img src="https://img.shields.io/github/license/seventwo-studio/clusage?style=flat-square" alt="MIT License">
+</p>
 
 ## Install
 
@@ -9,7 +22,7 @@ A macOS menu bar app that tracks your [Claude](https://claude.ai) API usage in r
 1. Download `Clusage.dmg` from the latest release
 2. Open the DMG and drag **Clusage** to your Applications folder
 3. Launch Clusage — it lives in your menu bar
-4. Click "Scan Keychain" to auto-detect your Claude Code credentials, or add a token manually
+4. Follow the onboarding to import your Claude Code credentials from the keychain
 
 > Clusage requires macOS 26 (Tahoe) or later.
 
