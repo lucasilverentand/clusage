@@ -12,7 +12,7 @@ jobs:
     runs-on: macos-26
     permissions: {}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install Tuist
         run: brew install tuist
@@ -37,7 +37,7 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4
+      - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
         id: release
 
   build:
@@ -50,7 +50,7 @@ jobs:
     env:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install Tuist
         run: brew install tuist
@@ -105,7 +105,6 @@ jobs:
             --entitlements Clusage.entitlements \
             build/export/Clusage.app
 
-          # Verify the signature
           codesign --verify --deep --strict build/export/Clusage.app
 
       - name: Notarize app
@@ -127,10 +126,55 @@ jobs:
 
       - name: Create DMG
         run: |
+          # Create a temporary directory for the DMG contents
+          mkdir -p build/dmg
+          cp -R build/export/Clusage.app build/dmg/
+
+          # Create a symlink to /Applications
+          ln -s /Applications build/dmg/Applications
+
+          # Create a read-write DMG first
           hdiutil create -volname "Clusage" \
-            -srcfolder build/export \
-            -ov -format UDZO \
-            build/Clusage.dmg
+            -srcfolder build/dmg \
+            -ov -format UDRW \
+            -fs HFS+ \
+            build/Clusage-rw.dmg
+
+          # Mount the DMG to set window properties
+          MOUNT_DIR=$(hdiutil attach -readwrite -noverify build/Clusage-rw.dmg | grep '/Volumes/' | awk '{print $3}')
+
+          # Set Finder window properties via AppleScript
+          osascript <<'APPLESCRIPT'
+            tell application "Finder"
+              tell disk "Clusage"
+                open
+                set current view of container window to icon view
+                set toolbar visible of container window to false
+                set statusbar visible of container window to false
+                set bounds of container window to {100, 100, 640, 400}
+                set theViewOptions to icon view options of container window
+                set arrangement of theViewOptions to not arranged
+                set icon size of theViewOptions to 80
+                set position of item "Clusage.app" of container window to {140, 150}
+                set position of item "Applications" of container window to {400, 150}
+                close
+              end tell
+            end tell
+          APPLESCRIPT
+
+          # Set the DMG icon layout
+          sync
+
+          # Unmount
+          hdiutil detach "$MOUNT_DIR"
+
+          # Convert to compressed read-only DMG
+          hdiutil convert build/Clusage-rw.dmg \
+            -format UDZO \
+            -imagekey zlib-level=9 \
+            -o build/Clusage.dmg
+
+          rm build/Clusage-rw.dmg
 
       - name: Create zip
         run: |
