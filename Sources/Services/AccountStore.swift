@@ -31,15 +31,28 @@ import Observation
         }
     }
 
-    func addAccount(name: String, token: String, profile: Profile? = nil, keychainServiceName: String? = nil) {
+    func addAccount(
+        name: String,
+        token: String,
+        profile: Profile? = nil,
+        keychainServiceName: String? = nil,
+        refreshToken: String? = nil,
+        tokenExpiresAt: Date? = nil,
+        credentialsFilePath: String? = nil
+    ) {
         var account = Account(name: name)
         account.profile = profile
         account.keychainServiceName = keychainServiceName
+        account.tokenExpiresAt = tokenExpiresAt
+        account.credentialsFilePath = credentialsFilePath
         Log.accounts.info("Adding account '\(name)' (\(account.id.uuidString))")
         tokens[account.id.uuidString] = token
         accounts.append(account)
         saveAccounts()
         _ = KeychainManager.saveToken(token, for: account.id)
+        if let refreshToken {
+            _ = KeychainManager.saveRefreshToken(refreshToken, for: account.id)
+        }
         Log.accounts.info("Account added. Total accounts: \(self.accounts.count)")
     }
 
@@ -52,6 +65,7 @@ import Observation
         }
         saveAccounts()
         KeychainManager.deleteToken(for: account.id)
+        KeychainManager.deleteRefreshToken(for: account.id)
         Log.accounts.info("Account removed. Total accounts: \(self.accounts.count)")
     }
 
@@ -87,10 +101,45 @@ import Observation
         return nil
     }
 
-    /// Refresh the token for an account from its bound keychain entry.
-    /// Each account must have a `keychainServiceName` — this method only reads from that entry.
-    /// Returns the new token if successfully refreshed, nil if the keychain entry is missing.
+    /// Try to refresh from the credentials file only (no keychain, no prompts).
+    /// Uses the account's custom `credentialsFilePath` if set, otherwise the default.
+    /// Returns the new token if the file has a different (presumably fresher) token, nil otherwise.
+    func refreshTokenFromCredentialsFile(for account: Account) -> String? {
+        guard let fileCred = CredentialsFileReader.read(path: account.credentialsFilePath) else { return nil }
+        let oldToken = tokens[account.id.uuidString]
+        guard fileCred.accessToken != oldToken else { return nil }
+
+        Log.accounts.info("[\(account.displayName)] Refreshed token from credentials file")
+        tokens[account.id.uuidString] = fileCred.accessToken
+        _ = KeychainManager.saveToken(fileCred.accessToken, for: account.id)
+        if let refreshToken = fileCred.refreshToken {
+            _ = KeychainManager.saveRefreshToken(refreshToken, for: account.id)
+        }
+        return fileCred.accessToken
+    }
+
+    /// Refresh the token for an account. Tries the credentials file for file-sourced accounts,
+    /// falls back to keychain for keychain-sourced accounts (prompt-free via security CLI).
     func refreshTokenFromKeychain(for account: Account) -> String? {
+        // For credentials-file-sourced accounts, re-read the file (no prompts)
+        if account.keychainServiceName == CredentialsFileReader.serviceName {
+            guard let fileCred = CredentialsFileReader.read(path: account.credentialsFilePath) else {
+                Log.accounts.warning("[\(account.displayName)] Credentials file unavailable")
+                return nil
+            }
+            let oldToken = tokens[account.id.uuidString]
+            if fileCred.accessToken != oldToken {
+                Log.accounts.info("[\(account.displayName)] Refreshed token from credentials file")
+                tokens[account.id.uuidString] = fileCred.accessToken
+                _ = KeychainManager.saveToken(fileCred.accessToken, for: account.id)
+                if let refreshToken = fileCred.refreshToken {
+                    _ = KeychainManager.saveRefreshToken(refreshToken, for: account.id)
+                }
+            }
+            return fileCred.accessToken
+        }
+
+        // Keychain-sourced accounts: read from keychain via security CLI (prompt-free)
         guard let serviceName = account.keychainServiceName else {
             Log.accounts.warning("[\(account.displayName)] No keychain binding — cannot refresh token")
             return nil
@@ -112,22 +161,71 @@ import Observation
         return credential.accessToken
     }
 
-    /// Refresh tokens from keychain for all accounts that have a keychain binding.
-    /// Returns true if any tokens were refreshed.
+    /// Try to self-refresh the token using the stored OAuth refresh token.
+    /// Returns the new access token on success, nil if no refresh token is stored or refresh fails.
+    func selfRefreshToken(for account: Account) async -> String? {
+        guard let refreshToken = KeychainManager.loadRefreshToken(for: account.id) else {
+            Log.accounts.debug("[\(account.displayName)] No refresh token stored — cannot self-refresh")
+            return nil
+        }
+
+        do {
+            let response = try await APIClient.shared.refreshAccessToken(refreshToken: refreshToken)
+
+            // Store the new access token
+            tokens[account.id.uuidString] = response.accessToken
+            _ = KeychainManager.saveToken(response.accessToken, for: account.id)
+
+            // Store the new refresh token if provided (token rotation)
+            if let newRefresh = response.refreshToken {
+                _ = KeychainManager.saveRefreshToken(newRefresh, for: account.id)
+            }
+
+            // Update expiry on the account
+            if let expiresIn = response.expiresIn {
+                var updated = account
+                updated.tokenExpiresAt = Date().addingTimeInterval(TimeInterval(expiresIn))
+                updateAccount(updated)
+            }
+
+            Log.accounts.info("[\(account.displayName)] Self-refreshed token successfully")
+            return response.accessToken
+        } catch {
+            Log.accounts.warning("[\(account.displayName)] Self-refresh failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Eagerly refresh tokens from the credentials file on startup.
+    /// Only refreshes file-sourced accounts for speed — keychain reads are also prompt-free
+    /// (via security CLI), but file reads are faster. Stale keychain-bound tokens refresh on 401.
     @discardableResult
     func refreshAllFromKeychain() -> Bool {
-        let boundAccounts = accounts.filter { $0.keychainServiceName != nil }
-        guard !boundAccounts.isEmpty else { return false }
+        let fileAccounts = accounts.filter { $0.keychainServiceName == CredentialsFileReader.serviceName }
+        guard !fileAccounts.isEmpty else {
+            Log.accounts.debug("No credentials-file accounts — skipping eager refresh")
+            return false
+        }
 
-        Log.accounts.info("Refreshing tokens from keychain for \(boundAccounts.count) bound account(s)")
+        Log.accounts.info("Refreshing tokens from credentials file for \(fileAccounts.count) account(s)")
         var refreshedAny = false
 
-        for account in boundAccounts {
-            let oldToken = tokens[account.id.uuidString]
-            if let freshToken = refreshTokenFromKeychain(for: account),
-               freshToken != oldToken {
-                refreshedAny = true
+        for account in fileAccounts {
+            guard let fileCred = CredentialsFileReader.read(path: account.credentialsFilePath) else {
+                Log.accounts.debug("[\(account.displayName)] Credentials file not available")
+                continue
             }
+
+            let oldToken = tokens[account.id.uuidString]
+            guard fileCred.accessToken != oldToken else { continue }
+
+            Log.accounts.info("[\(account.displayName)] Refreshed token from credentials file")
+            tokens[account.id.uuidString] = fileCred.accessToken
+            _ = KeychainManager.saveToken(fileCred.accessToken, for: account.id)
+            if let refreshToken = fileCred.refreshToken {
+                _ = KeychainManager.saveRefreshToken(refreshToken, for: account.id)
+            }
+            refreshedAny = true
         }
 
         return refreshedAny

@@ -35,18 +35,7 @@ struct AccountDetailView: View {
                     )
                 }
 
-                gauges
-
-                if let momentum {
-                    FiveHourMomentumCard(
-                        momentum: momentum,
-                        burstSummary: burstSummary
-                    )
-                }
-
-                if let projection {
-                    SevenDayProjectionCard(projection: projection)
-                }
+                windowCards
 
                 // Show standalone streak card only when there's no daily target card
                 if dailyTarget == nil, let streak, streak.currentStreak > 0 {
@@ -72,7 +61,6 @@ struct AccountDetailView: View {
         }
         .navigationTitle(account.displayName)
         .navigationSubtitle(account.lastUpdated.map { "Updated \(DateFormatting.relativeTime(from: $0))" } ?? "")
-        .toolbarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -130,30 +118,25 @@ struct AccountDetailView: View {
         return "\(secs)s"
     }
 
-    // MARK: - Gauges
+    // MARK: - Window Cards
 
     @ViewBuilder
-    private var gauges: some View {
+    private var windowCards: some View {
         if account.fiveHour != nil || account.sevenDay != nil {
-            HStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
                 if let fiveHour = account.fiveHour {
-                    GlassCard {
-                        UsageGaugeView(
-                            title: "5-Hour Window",
-                            window: fiveHour,
-                            momentum: momentum
-                        )
-                    }
+                    FiveHourCard(
+                        window: fiveHour,
+                        momentum: momentum,
+                        burstSummary: burstSummary
+                    )
                 }
 
                 if let sevenDay = account.sevenDay {
-                    GlassCard {
-                        UsageGaugeView(
-                            title: "7-Day Window",
-                            window: sevenDay,
-                            granularPercent: projection?.currentGranularUtilization()
-                        )
-                    }
+                    SevenDayCard(
+                        window: sevenDay,
+                        projection: projection
+                    )
                 }
             }
         } else if let error = account.lastError {

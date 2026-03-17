@@ -62,8 +62,6 @@ struct DashboardView: View {
                         )
                     }
                 }
-                .background(.ultraThinMaterial, ignoresSafeAreaEdges: .all)
-                .glassWindow()
                 .frame(minWidth: 480, minHeight: 400)
             }
         }
@@ -75,19 +73,33 @@ private struct OnboardingContainer: View {
     let accountStore: AccountStore
     let poller: UsagePoller?
     @State private var onboardingViewModel: AccountsViewModel?
+    @State private var skipped = false
 
     var body: some View {
-        OnboardingView(viewModel: onboardingViewModel ?? AccountsViewModel(accountStore: accountStore))
-            .frame(width: 560)
-            .fixedSize(horizontal: false, vertical: true)
-            .onAppear {
-                if onboardingViewModel == nil {
-                    let vm = AccountsViewModel(accountStore: accountStore)
-                    vm.onAccountsAdded = { [weak poller] in
-                        poller?.pollNewAccountsIfNeeded()
-                    }
-                    onboardingViewModel = vm
-                }
+        Group {
+            if skipped {
+                ContentUnavailableView(
+                    "No Accounts Yet",
+                    systemImage: "person.crop.circle.badge.plus",
+                    description: Text("Add an account from Settings to get started.")
+                )
+            } else {
+                OnboardingView(
+                    viewModel: onboardingViewModel ?? AccountsViewModel(accountStore: accountStore),
+                    onSkip: { skipped = true }
+                )
+                .frame(width: 560)
+                .fixedSize(horizontal: false, vertical: true)
             }
+        }
+        .onAppear {
+            if onboardingViewModel == nil {
+                let vm = AccountsViewModel(accountStore: accountStore)
+                vm.onAccountsAdded = { [weak poller] in
+                    poller?.pollNewAccountsIfNeeded()
+                }
+                onboardingViewModel = vm
+            }
+        }
     }
 }

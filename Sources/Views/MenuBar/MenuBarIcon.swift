@@ -15,6 +15,10 @@ struct MenuBarIcon: View {
         primary?.sevenDay?.normalizedUtilization ?? 0
     }
 
+    private var maxFraction: Double {
+        max(fiveHourFraction, sevenDayFraction)
+    }
+
     private var accessibilityDescription: String {
         let fivePercent = Int(fiveHourFraction * 100)
         let sevenPercent = Int(sevenDayFraction * 100)
@@ -56,25 +60,50 @@ struct MenuBarIcon: View {
 
             let center = CGPoint(x: size / 2, y: size / 2)
 
-            // Menu bar icons use .primary which is white in dark mode, black in light.
-            // NSStatusBarButton template images get auto-tinted, so draw in black
-            // and mark the image as template.
-            let trackColor = CGColor(gray: 0, alpha: 0.35)
-            let fillColor = CGColor(gray: 0, alpha: 1)
+            let isCritical = maxFraction > 0.9
+            let isWarning = maxFraction > 0.75
+
+            // Template images get auto-tinted by the system.
+            // For warning/critical states we draw with higher opacity to make the rings visually heavier.
+            let trackColor = CGColor(gray: 0, alpha: 0.25)
+            let normalFill = CGColor(gray: 0, alpha: 1)
+            let warningFill = CGColor(gray: 0, alpha: 1)
+            let criticalFill = CGColor(gray: 0, alpha: 1)
+
+            let outerFill = isCritical ? criticalFill : isWarning ? warningFill : normalFill
+            let innerFill = outerFill
+
+            let outerLineWidth: CGFloat = isCritical ? 2.5 : 2
+            let innerLineWidth: CGFloat = isCritical ? 2.5 : 2
 
             // Outer ring: 7-day
             let outerRadius = size / 2 - 1
             drawRing(
-                in: cg, center: center, radius: outerRadius, lineWidth: 2,
-                fraction: sevenDayFraction, trackColor: trackColor, fillColor: fillColor
+                in: cg, center: center, radius: outerRadius, lineWidth: outerLineWidth,
+                fraction: sevenDayFraction, trackColor: trackColor, fillColor: outerFill
             )
 
             // Inner ring: 5-hour
             let innerRadius = outerRadius - 3.5
             drawRing(
-                in: cg, center: center, radius: innerRadius, lineWidth: 2,
-                fraction: fiveHourFraction, trackColor: trackColor, fillColor: fillColor
+                in: cg, center: center, radius: innerRadius, lineWidth: innerLineWidth,
+                fraction: fiveHourFraction, trackColor: trackColor, fillColor: innerFill
             )
+
+
+            // Critical dot indicator (top-right)
+            if isCritical {
+                let dotRadius: CGFloat = 1.5
+                let dotCenter = CGPoint(x: size - dotRadius - 0.5, y: size - dotRadius - 0.5)
+                cg.setFillColor(CGColor(gray: 0, alpha: 1))
+                cg.addEllipse(in: CGRect(
+                    x: dotCenter.x - dotRadius,
+                    y: dotCenter.y - dotRadius,
+                    width: dotRadius * 2,
+                    height: dotRadius * 2
+                ))
+                cg.fillPath()
+            }
 
             NSGraphicsContext.restoreGraphicsState()
             return rep

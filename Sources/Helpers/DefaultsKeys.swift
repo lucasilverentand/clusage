@@ -21,4 +21,15 @@ enum DefaultsKeys {
     // MARK: - App Lifecycle
 
     static let lastQuitAt = "clusage.lastQuitAt"
+
+    // MARK: - Updates
+
+    static let lastUpdateCheck = "clusage.update.lastCheck"
+    static let skipVersion = "clusage.update.skipVersion"
+    static let autoCheckUpdates = "clusage.update.autoCheck"
+
+    // MARK: - Keyboard Shortcut
+
+    static let dashboardHotkeyModifiers = "clusage.hotkey.modifiers"
+    static let dashboardHotkeyKeyCode = "clusage.hotkey.keyCode"
 }
