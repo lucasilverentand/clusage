@@ -163,7 +163,19 @@ struct AccountsPageView: View {
     }
 
     private func detectCredentials() async {
-        var credentials = KeychainManager.detectAllClaudeCodeCredentials()
+        var credentials: [DetectedCredential] = []
+
+        // Credentials file (fastest, no subprocess)
+        if let fileCred = CredentialsFileReader.read() {
+            credentials.append(fileCred)
+        }
+
+        // Keychain via security CLI (prompt-free)
+        let keychainCreds = KeychainManager.detectAllClaudeCodeCredentials()
+        let existingTokens = Set(credentials.map(\.accessToken))
+        for cred in keychainCreds where !existingTokens.contains(cred.accessToken) {
+            credentials.append(cred)
+        }
 
         for i in credentials.indices {
             do {
@@ -192,7 +204,9 @@ struct AccountsPageView: View {
                     name: name,
                     token: credential.accessToken,
                     profile: Profile(from: profile),
-                    keychainServiceName: credential.serviceName
+                    keychainServiceName: credential.serviceName,
+                    refreshToken: credential.refreshToken,
+                    tokenExpiresAt: credential.expiresAt
                 )
                 poller?.pollNewAccountsIfNeeded()
                 Log.accounts.info("Imported credential '\(credential.label)' as '\(name)'")
@@ -247,6 +261,7 @@ private struct AccountRow: View {
     let accountStore: AccountStore
     var onDelete: () -> Void
     @State private var showingRelinkSheet = false
+    @State private var showingCredentialsPathSheet = false
 
     private var isMenuBarAccount: Bool {
         accountStore.menuBarAccountID == account.id
@@ -279,6 +294,14 @@ private struct AccountRow: View {
                     Text("Updated \(DateFormatting.relativeTime(from: lastUpdated))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                if let customPath = account.credentialsFilePath {
+                    Text(customPath)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
             }
 
@@ -329,6 +352,10 @@ private struct AccountRow: View {
                 accountStore.menuBarAccountID = account.id
             }
 
+            Button("Set Credentials File Path…") {
+                showingCredentialsPathSheet = true
+            }
+
             Button("Re-link Keychain Entry…") {
                 showingRelinkSheet = true
             }
@@ -341,6 +368,9 @@ private struct AccountRow: View {
         }
         .sheet(isPresented: $showingRelinkSheet) {
             RelinkKeychainView(account: account, accountStore: accountStore)
+        }
+        .sheet(isPresented: $showingCredentialsPathSheet) {
+            CredentialsPathSheet(account: account, accountStore: accountStore)
         }
     }
 }
@@ -470,6 +500,130 @@ private struct RelinkKeychainView: View {
             accountStore.relinkKeychain(for: account, credential: credential)
             isValidating = false
             dismiss()
+        }
+    }
+}
+
+/// Sheet to set a custom credentials file path per account.
+private struct CredentialsPathSheet: View {
+    let account: Account
+    let accountStore: AccountStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var path: String = ""
+    @State private var validationStatus: ValidationStatus = .idle
+
+    private enum ValidationStatus: Equatable {
+        case idle
+        case valid
+        case invalid(String)
+    }
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("Credentials File")
+                .font(.title2.bold())
+
+            Text("Set the path to the `.credentials.json` file for **\(account.displayName)**.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    TextField(CredentialsFileReader.defaultPath, text: $path)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+
+                    Button("Browse…") { browseForFile() }
+                }
+
+                switch validationStatus {
+                case .idle:
+                    EmptyView()
+                case .valid:
+                    Label("File found — contains a valid token", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.caption)
+                case .invalid(let message):
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                }
+            }
+
+            HStack {
+                if account.credentialsFilePath != nil {
+                    Button("Reset to Default") {
+                        var updated = account
+                        updated.credentialsFilePath = nil
+                        accountStore.updateAccount(updated)
+                        dismiss()
+                    }
+                }
+
+                Spacer()
+
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
+        .onAppear {
+            path = account.credentialsFilePath ?? ""
+        }
+        .onChange(of: path) {
+            validate()
+        }
+    }
+
+    private func validate() {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            validationStatus = .idle
+            return
+        }
+
+        if let _ = CredentialsFileReader.read(path: trimmed) {
+            validationStatus = .valid
+        } else {
+            let expanded = NSString(string: trimmed).expandingTildeInPath
+            if FileManager.default.fileExists(atPath: expanded) {
+                validationStatus = .invalid("File exists but doesn't contain a valid credential")
+            } else {
+                validationStatus = .invalid("File not found")
+            }
+        }
+    }
+
+    private func save() {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        var updated = account
+        updated.credentialsFilePath = trimmed.isEmpty ? nil : trimmed
+        // If sourced from keychain, switch to credentials-file source
+        if CredentialsFileReader.read(path: trimmed) != nil {
+            updated.keychainServiceName = CredentialsFileReader.serviceName
+        }
+        accountStore.updateAccount(updated)
+        dismiss()
+    }
+
+    private func browseForFile() {
+        let panel = NSOpenPanel()
+        panel.title = "Select .credentials.json"
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.showsHiddenFiles = true
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude")
+
+        if panel.runModal() == .OK, let url = panel.url {
+            path = url.path
         }
     }
 }

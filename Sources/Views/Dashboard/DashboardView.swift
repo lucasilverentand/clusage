@@ -62,8 +62,6 @@ struct DashboardView: View {
                         )
                     }
                 }
-                .background(.ultraThinMaterial, ignoresSafeAreaEdges: .all)
-                .glassWindow()
                 .frame(minWidth: 480, minHeight: 400)
             }
         }

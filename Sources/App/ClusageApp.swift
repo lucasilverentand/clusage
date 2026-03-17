@@ -59,6 +59,7 @@ struct ClusageApp: App {
             }
         }
         .windowResizability(.contentSize)
+        .windowToolbarStyle(.unified)
 
         Settings {
             SettingsView(

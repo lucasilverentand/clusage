@@ -1,11 +1,15 @@
 import Foundation
 import Security
 
-/// A Claude Code credential found in the macOS Keychain.
+/// A Claude Code credential found in the macOS Keychain or credentials file.
 struct DetectedCredential: Identifiable, Sendable {
     let id = UUID()
     let serviceName: String
     let accessToken: String
+    /// OAuth refresh token (if available from the credential source).
+    var refreshToken: String?
+    /// When the access token expires (if known).
+    var expiresAt: Date?
     /// Email fetched from the profile API (populated after detection).
     var email: String?
 
@@ -16,13 +20,14 @@ struct DetectedCredential: Identifiable, Sendable {
 }
 
 /// Handles Claude Code credential detection from the system keychain.
-/// Uses the `security` CLI to avoid Security framework prompts.
+/// Uses `/usr/bin/security` CLI for prompt-free reads — the Apple-signed binary matches
+/// the `apple-tool:` partition_id, so it never triggers macOS password dialogs.
 /// Token storage for Clusage accounts uses the macOS Keychain via the Security framework.
 enum KeychainManager {
 
     // MARK: - Claude Code Detection
 
-    /// Find all Claude Code credential entries using the `security` CLI to avoid keychain prompts.
+    /// Find all Claude Code credential entries via the security CLI (prompt-free).
     static func detectAllClaudeCodeCredentials() -> [DetectedCredential] {
         Log.keychain.debug("Searching for Claude Code keychain items via security CLI")
 
@@ -45,7 +50,9 @@ enum KeychainManager {
         return credentials
     }
 
-    /// Use `security dump-keychain` to find service names matching Claude Code without prompting.
+    /// Find all keychain service names containing "Claude Code-credentials".
+    /// Uses `security dump-keychain` for discovery — it reads metadata without triggering
+    /// any access prompts. The actual credential data is read later via `security find-generic-password`.
     private static func findClaudeCodeServiceNames() -> [String] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
@@ -82,7 +89,9 @@ enum KeychainManager {
         return Array(serviceNames)
     }
 
-    /// Fetch a single Claude Code credential by service name using `security find-generic-password`.
+    /// Fetch a single Claude Code credential by service name via `/usr/bin/security`.
+    /// The Apple-signed binary matches `apple-tool:` partition_id — never triggers password prompts,
+    /// even after Claude Code rotates its OAuth token.
     static func fetchClaudeCodeCredential(serviceName: String) -> DetectedCredential? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
@@ -95,22 +104,38 @@ enum KeychainManager {
         do {
             try process.run()
         } catch {
-            Log.keychain.warning("Failed to read '\(serviceName)': \(error.localizedDescription)")
+            Log.keychain.warning("Failed to run security CLI for '\(serviceName)': \(error.localizedDescription)")
+            return nil
+        }
+
+        // 2-second timeout guard against corrupted keychain locks
+        let deadline = Date().addingTimeInterval(2)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        if process.isRunning {
+            process.terminate()
+            Log.keychain.warning("security CLI timed out for '\(serviceName)'")
+            return nil
+        }
+
+        let exitCode = process.terminationStatus
+        guard exitCode == 0 else {
+            if exitCode == 44 {
+                Log.keychain.debug("Keychain item '\(serviceName)' not found (exit 44)")
+            } else {
+                Log.keychain.warning("security CLI failed for '\(serviceName)': exit code \(exitCode)")
+            }
             return nil
         }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            Log.keychain.warning("security CLI returned \(process.terminationStatus) for '\(serviceName)'")
-            return nil
-        }
-
         return parseClaudeCodeCredential(data: data, serviceName: serviceName)
     }
 
-    private static func parseClaudeCodeCredential(data: Data, serviceName: String) -> DetectedCredential? {
+    /// Parse the raw keychain data into a `DetectedCredential`.
+    /// Internal access for testability.
+    static func parseClaudeCodeCredential(data: Data, serviceName: String) -> DetectedCredential? {
         guard let raw = String(data: data, encoding: .utf8) else {
             Log.keychain.warning("Non-UTF8 data in '\(serviceName)'")
             return nil
@@ -127,8 +152,13 @@ enum KeychainManager {
 
         if let oauth = json["claudeAiOauth"] as? [String: Any],
            let accessToken = oauth["accessToken"] as? String {
-            Log.keychain.debug("Parsed credential from '\(serviceName)' (token length: \(accessToken.count))")
-            return DetectedCredential(serviceName: serviceName, accessToken: accessToken)
+            let refreshToken = oauth["refreshToken"] as? String
+            var expiresAt: Date?
+            if let expiresAtMs = oauth["expiresAt"] as? Double {
+                expiresAt = Date(timeIntervalSince1970: expiresAtMs / 1000)
+            }
+            Log.keychain.debug("Parsed credential from '\(serviceName)' (token length: \(accessToken.count), hasRefresh: \(refreshToken != nil))")
+            return DetectedCredential(serviceName: serviceName, accessToken: accessToken, refreshToken: refreshToken, expiresAt: expiresAt)
         }
 
         if let accessToken = json["accessToken"] as? String ?? json["access_token"] as? String {
@@ -192,6 +222,62 @@ enum KeychainManager {
 
     static func deleteToken(for accountID: UUID) {
         let service = servicePrefix + accountID.uuidString
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: accountID.uuidString,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    // MARK: - Refresh Token Storage
+
+    private static let refreshServicePrefix = "studio.seventwo.clusage.refresh."
+
+    static func saveRefreshToken(_ token: String, for accountID: UUID) -> Bool {
+        let service = refreshServicePrefix + accountID.uuidString
+        let data = Data(token.utf8)
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: accountID.uuidString,
+        ]
+
+        let updateAttrs: [String: Any] = [kSecValueData as String: data]
+        let updateStatus = SecItemUpdate(query as CFDictionary, updateAttrs as CFDictionary)
+
+        if updateStatus == errSecSuccess { return true }
+
+        var addQuery = query
+        addQuery[kSecValueData as String] = data
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+
+        if addStatus != errSecSuccess {
+            Log.keychain.error("Failed to save refresh token for \(accountID.uuidString): OSStatus \(addStatus)")
+        }
+        return addStatus == errSecSuccess
+    }
+
+    static func loadRefreshToken(for accountID: UUID) -> String? {
+        let service = refreshServicePrefix + accountID.uuidString
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: accountID.uuidString,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func deleteRefreshToken(for accountID: UUID) {
+        let service = refreshServicePrefix + accountID.uuidString
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

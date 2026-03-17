@@ -35,6 +35,44 @@ actor APIClient {
         return try await fetchUsage(token: token)
     }
 
+    // MARK: - OAuth Token Refresh
+
+    static let claudeOAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+    private static let tokenURL = URL(string: "https://platform.claude.com/v1/oauth/token")!
+
+    /// Refresh an access token using the OAuth refresh_token grant.
+    func refreshAccessToken(refreshToken: String) async throws -> TokenRefreshResponse {
+        var request = URLRequest(url: Self.tokenURL)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue("Clusage/\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown")", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 15
+
+        let body = [
+            "grant_type=refresh_token",
+            "refresh_token=\(refreshToken)",
+            "client_id=\(Self.claudeOAuthClientID)",
+        ].joined(separator: "&")
+        request.httpBody = Data(body.utf8)
+
+        Log.api.debug("Refreshing access token via OAuth")
+        let (data, response) = try await session.data(for: request)
+
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            let responseBody = String(data: data, encoding: .utf8)
+            Log.api.error("Token refresh failed: HTTP \(http.statusCode) — \(responseBody ?? "<no body>")")
+            throw APIError.httpError(statusCode: http.statusCode, body: responseBody)
+        }
+
+        let tokenResponse = try JSONDecoder().decode(TokenRefreshResponse.self, from: data)
+        Log.api.info("Token refreshed successfully (new token length: \(tokenResponse.accessToken.count))")
+        return tokenResponse
+    }
+
     // MARK: - Private
 
     private func makeRequest(url: URL, token: String) -> URLRequest {

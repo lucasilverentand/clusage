@@ -442,6 +442,17 @@ import Foundation
 
     private func poll(account: Account) async -> PollResult {
         do {
+            // Proactive refresh: if token expires within 5 minutes, refresh before polling
+            if let expiresAt = account.tokenExpiresAt,
+               expiresAt.timeIntervalSinceNow < 300 {
+                Log.poller.info("[\(account.name)] Token expires in \(String(format: "%.0f", expiresAt.timeIntervalSinceNow))s — proactive refresh")
+                if let freshToken = await accountStore.selfRefreshToken(for: account) {
+                    Log.poller.info("[\(account.name)] Proactive refresh succeeded")
+                    return try await pollWithToken(freshToken, account: account)
+                }
+                Log.poller.debug("[\(account.name)] Proactive self-refresh failed — continuing with current token")
+            }
+
             guard account.keychainServiceName != nil else {
                 Log.poller.warning("[\(account.name)] No keychain binding — skipping")
                 var updated = account
@@ -456,13 +467,30 @@ import Foundation
 
             return try await pollWithToken(token, account: account)
         } catch let error as APIError where error.is401 {
-            // Token expired — try refreshing from the account's bound keychain entry
-            Log.poller.info("[\(account.name)] 401 — attempting keychain token refresh")
-            if let freshToken = accountStore.refreshTokenFromKeychain(for: account) {
-                Log.poller.info("[\(account.name)] Got fresh token from keychain — retrying")
+            // Token expired — try self-refresh first, then fall back to keychain re-read
+            Log.poller.info("[\(account.name)] 401 — attempting self-refresh")
+            if let freshToken = await accountStore.selfRefreshToken(for: account) {
+                Log.poller.info("[\(account.name)] Self-refresh succeeded — retrying")
+                do {
+                    return try await pollWithToken(freshToken, account: account)
+                } catch let retryError as APIError where retryError.isRateLimited {
+                    let retryAfter: Double?
+                    if case .rateLimited(let ra) = retryError { retryAfter = ra } else { retryAfter = nil }
+                    Log.poller.warning("[\(account.name)] Retry hit rate limit")
+                    return PollResult(changed: false, rateLimited: true, retryAfter: retryAfter)
+                } catch {
+                    Log.poller.error("[\(account.name)] Retry with self-refreshed token failed: \(error.localizedDescription)")
+                    return handlePollError(error, account: account)
+                }
+            }
+
+            // Fall back to credentials file (prompt-free), then keychain (both prompt-free)
+            Log.poller.info("[\(account.name)] Self-refresh unavailable — trying credential refresh")
+            if let freshToken = accountStore.refreshTokenFromCredentialsFile(for: account)
+                ?? accountStore.refreshTokenFromKeychain(for: account) {
+                Log.poller.info("[\(account.name)] Got fresh token — retrying")
                 do {
                     let result = try await pollWithToken(freshToken, account: account)
-                    // Validate email after successful refresh to catch mismatched tokens
                     await validateTokenOwnership(token: freshToken, account: account)
                     return result
                 } catch let retryError as APIError where retryError.isRateLimited {
@@ -475,19 +503,19 @@ import Foundation
                     return handlePollError(error, account: account)
                 }
             }
-            Log.poller.warning("[\(account.name)] Keychain refresh failed — token is expired")
+            Log.poller.warning("[\(account.name)] All refresh methods failed — token is expired")
             return handlePollError(error, account: account)
         } catch let error as APIError where error.isRateLimited {
             let retryAfter: Double?
             if case .rateLimited(let ra) = error { retryAfter = ra } else { retryAfter = nil }
 
-            // Before entering cooldown, check if the keychain has a newer token.
+            // Before entering cooldown, check if the credentials file has a newer token.
             // Some APIs return 429 for expired tokens, and a re-login may have
-            // put a fresh token in the keychain that would succeed immediately.
+            // put a fresh token that would succeed immediately.
             let currentToken = accountStore.token(for: account)
-            if let freshToken = accountStore.refreshTokenFromKeychain(for: account),
+            if let freshToken = accountStore.refreshTokenFromCredentialsFile(for: account),
                freshToken != currentToken {
-                Log.poller.info("[\(account.name)] Rate-limited but keychain has a new token — retrying")
+                Log.poller.info("[\(account.name)] Rate-limited but credentials file has a new token — retrying")
                 do {
                     return try await pollWithToken(freshToken, account: account)
                 } catch {

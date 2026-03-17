@@ -90,26 +90,6 @@ struct MenuBarIcon: View {
                 fraction: fiveHourFraction, trackColor: trackColor, fillColor: innerFill
             )
 
-            // Percentage text in center (only if we have data)
-            if maxFraction > 0 {
-                let percent = Int(maxFraction * 100)
-                let text = "\(min(percent, 99))" as NSString
-                let fontSize: CGFloat = percent >= 10 ? 4.5 : 5.5
-                let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
-                let attrs: [NSAttributedString.Key: Any] = [
-                    .font: font,
-                    .foregroundColor: NSColor.black,
-                ]
-                let textSize = text.size(withAttributes: attrs)
-                let textRect = CGRect(
-                    x: center.x - textSize.width / 2,
-                    y: center.y - textSize.height / 2,
-                    width: textSize.width,
-                    height: textSize.height
-                )
-                NSGraphicsContext.current = ctx
-                text.draw(in: textRect, withAttributes: attrs)
-            }
 
             // Critical dot indicator (top-right)
             if isCritical {

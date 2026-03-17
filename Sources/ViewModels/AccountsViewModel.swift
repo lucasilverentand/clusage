@@ -58,11 +58,11 @@ final class AccountsViewModel {
             _ = try await APIClient.shared.validateToken(token)
             let profile = try await APIClient.shared.fetchProfile(token: token)
 
-            // Resolve keychain binding: use selected credential, or auto-detect by matching token
+            // Resolve keychain binding: use selected credential, or match against
+            // already-detected credentials (avoids a new keychain scan + prompts)
             var keychainService = selectedKeychainServiceName
             if keychainService == nil {
-                let allCredentials = KeychainManager.detectAllClaudeCodeCredentials()
-                keychainService = allCredentials.first(where: { $0.accessToken == token })?.serviceName
+                keychainService = detectedCredentials.first(where: { $0.accessToken == token })?.serviceName
                 if let service = keychainService {
                     Log.accounts.info("Auto-detected keychain entry '\(service)' for manual token")
                 }
@@ -92,9 +92,23 @@ final class AccountsViewModel {
         accountStore.removeAccount(account)
     }
 
-    /// Discover all Claude Code credentials from the Keychain, then enrich with profile info.
+    /// Discover Claude Code credentials from both the credentials file and keychain.
+    /// Both sources are prompt-free — the credentials file is read directly, and the
+    /// keychain is read via the security CLI (matches `apple-tool:` partition_id).
     func detectCredentials() async {
-        var credentials = KeychainManager.detectAllClaudeCodeCredentials()
+        var credentials: [DetectedCredential] = []
+
+        // Credentials file (fastest, no subprocess)
+        if let fileCred = CredentialsFileReader.read() {
+            credentials.append(fileCred)
+        }
+
+        // Keychain via security CLI (prompt-free)
+        let keychainCreds = KeychainManager.detectAllClaudeCodeCredentials()
+        let existingTokens = Set(credentials.map(\.accessToken))
+        for cred in keychainCreds where !existingTokens.contains(cred.accessToken) {
+            credentials.append(cred)
+        }
 
         // Fetch profile for each credential to get email
         for i in credentials.indices {
@@ -157,7 +171,9 @@ final class AccountsViewModel {
                     name: name,
                     token: credential.accessToken,
                     profile: Profile(from: profile),
-                    keychainServiceName: credential.serviceName
+                    keychainServiceName: credential.serviceName,
+                    refreshToken: credential.refreshToken,
+                    tokenExpiresAt: credential.expiresAt
                 )
                 importedCount += 1
                 Log.accounts.info("Imported credential '\(credential.label)' as '\(name)'")
