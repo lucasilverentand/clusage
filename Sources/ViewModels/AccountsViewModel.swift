@@ -3,6 +3,7 @@ import Foundation
 @MainActor @Observable
 final class AccountsViewModel {
     let accountStore: AccountStore
+    let apiClient: APIClient
     var newAccountName = ""
     var newAccountToken = ""
     /// Keychain service name of the selected credential (if any).
@@ -25,8 +26,9 @@ final class AccountsViewModel {
     /// Called after accounts are successfully added/imported so the poller can fetch data immediately.
     var onAccountsAdded: (() -> Void)?
 
-    init(accountStore: AccountStore) {
+    init(accountStore: AccountStore, apiClient: APIClient = .shared) {
         self.accountStore = accountStore
+        self.apiClient = apiClient
     }
 
     var accounts: [Account] {
@@ -55,13 +57,13 @@ final class AccountsViewModel {
         error = nil
 
         do {
-            _ = try await APIClient.shared.validateToken(token)
-            let profile = try await APIClient.shared.fetchProfile(token: token)
+            _ = try await apiClient.validateToken(token)
+            let profile = try await apiClient.fetchProfile(token: token)
 
             // Resolve keychain binding: use selected credential, or auto-detect by matching token
             var keychainService = selectedKeychainServiceName
             if keychainService == nil {
-                let allCredentials = KeychainManager.detectAllClaudeCodeCredentials()
+                let allCredentials = await KeychainManager.detectAllClaudeCodeCredentials()
                 keychainService = allCredentials.first(where: { $0.accessToken == token })?.serviceName
                 if let service = keychainService {
                     Log.accounts.info("Auto-detected keychain entry '\(service)' for manual token")
@@ -94,12 +96,12 @@ final class AccountsViewModel {
 
     /// Discover all Claude Code credentials from the Keychain, then enrich with profile info.
     func detectCredentials() async {
-        var credentials = KeychainManager.detectAllClaudeCodeCredentials()
+        var credentials = await KeychainManager.detectAllClaudeCodeCredentials()
 
         // Fetch profile for each credential to get email
         for i in credentials.indices {
             do {
-                let profile = try await APIClient.shared.fetchProfile(token: credentials[i].accessToken)
+                let profile = try await apiClient.fetchProfile(token: credentials[i].accessToken)
                 credentials[i].email = profile.account.email
             } catch {
                 Log.accounts.warning("Could not fetch profile for '\(credentials[i].serviceName)': \(error.localizedDescription)")
@@ -150,8 +152,8 @@ final class AccountsViewModel {
         for credential in uniqueImports {
             do {
                 // validateToken hits usage endpoint — confirms the token works
-                _ = try await APIClient.shared.validateToken(credential.accessToken)
-                let profile = try await APIClient.shared.fetchProfile(token: credential.accessToken)
+                _ = try await apiClient.validateToken(credential.accessToken)
+                let profile = try await apiClient.fetchProfile(token: credential.accessToken)
                 let name = profile.account.email
                 accountStore.addAccount(
                     name: name,

@@ -17,6 +17,9 @@ struct MonitoringGap: Codable, Identifiable, Sendable {
     private(set) var snapshots: [UsageSnapshot] = []
     private(set) var gaps: [MonitoringGap] = []
 
+    /// Indexed snapshots by account ID for fast lookups.
+    private var snapshotsByAccount: [UUID: [UsageSnapshot]] = [:]
+
     private let fileURL: URL
     private let gapsFileURL: URL
 
@@ -35,7 +38,7 @@ struct MonitoringGap: Codable, Identifiable, Sendable {
     func addSnapshot(_ snapshot: UsageSnapshot) {
         // Deduplicate: skip if the most recent snapshot for this account
         // has the same values and was recorded less than 45 seconds ago
-        if let last = snapshots.reversed().first(where: { $0.accountID == snapshot.accountID }),
+        if let last = snapshotsByAccount[snapshot.accountID]?.last,
            snapshot.timestamp.timeIntervalSince(last.timestamp) < 45,
            abs(snapshot.fiveHourUtilization - last.fiveHourUtilization) < 0.01,
            abs(snapshot.sevenDayUtilization - last.sevenDayUtilization) < 0.01
@@ -43,6 +46,7 @@ struct MonitoringGap: Codable, Identifiable, Sendable {
             return
         }
         snapshots.append(snapshot)
+        snapshotsByAccount[snapshot.accountID, default: []].append(snapshot)
         addCount += 1
         if addCount % 100 == 0 {
             prune()
@@ -50,7 +54,7 @@ struct MonitoringGap: Codable, Identifiable, Sendable {
     }
 
     func snapshots(for accountID: UUID) -> [UsageSnapshot] {
-        snapshots.filter { $0.accountID == accountID }
+        snapshotsByAccount[accountID] ?? []
     }
 
     /// Remove snapshots older than 30 days.
@@ -58,6 +62,12 @@ struct MonitoringGap: Codable, Identifiable, Sendable {
         let cutoff = Date.now.addingTimeInterval(-30 * 24 * 60 * 60)
         snapshots.removeAll { $0.timestamp < cutoff }
         gaps.removeAll { $0.end < cutoff }
+        rebuildIndex()
+    }
+
+    /// Rebuild the per-account index from the flat array.
+    private func rebuildIndex() {
+        snapshotsByAccount = Dictionary(grouping: snapshots, by: \.accountID)
     }
 
     // MARK: - Gaps
@@ -86,6 +96,7 @@ struct MonitoringGap: Codable, Identifiable, Sendable {
 
     func clearAll() {
         snapshots.removeAll()
+        snapshotsByAccount.removeAll()
         gaps.removeAll()
         save()
         saveGaps()
@@ -101,5 +112,6 @@ struct MonitoringGap: Codable, Identifiable, Sendable {
     private func loadSnapshots() {
         guard let data = try? Data(contentsOf: fileURL) else { return }
         snapshots = (try? JSONDecoder().decode([UsageSnapshot].self, from: data)) ?? []
+        rebuildIndex()
     }
 }

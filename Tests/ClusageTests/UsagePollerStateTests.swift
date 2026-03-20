@@ -312,7 +312,7 @@ struct UsagePollerStateTests {
         let oldTimestamp = Date().timeIntervalSince1970 - 90000
         UserDefaults.standard.set(
             [oldTimestamp, oldTimestamp + 1, oldTimestamp + 2],
-            forKey: "Clusage.polling.rateLimitEvents"
+            forKey: DefaultsKeys.pollingRateLimitEvents
         )
 
         #expect(PollingSettings.adaptiveMultiplier() == 1.0)

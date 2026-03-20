@@ -6,9 +6,10 @@ struct DaySlot: Codable, Sendable, Equatable {
     var endHour: Int = 23
 
     /// Active hours in this slot.
+    /// When `startHour == endHour`, this means a full 24-hour active day.
     var activeHours: Double {
         guard isActive else { return 0 }
-        guard endHour != startHour else { return 0 }
+        if endHour == startHour { return 24 }
         if endHour > startHour {
             return Double(endHour - startHour)
         } else {
@@ -41,27 +42,26 @@ struct UsagePlan: Codable, Sendable {
 
     // MARK: - Day Boundary
 
-    /// Returns the "plan weekday" for the given date. Before the day boundary hour,
-    /// the date belongs to the previous plan day (e.g. 2 AM Tuesday = Monday's plan).
-    static func planWeekday(for date: Date) -> Int {
+    /// Returns the calendar date for the plan day containing `date`.
+    /// Before the day boundary hour, the date belongs to the previous plan day
+    /// (e.g. 2 AM Tuesday = Monday's plan).
+    static func planCalendarDay(for date: Date) -> Date {
         let cal = Calendar.current
         let hour = cal.component(.hour, from: date)
         if hour < dayBoundaryHour {
-            // Still part of yesterday's plan day
-            let yesterday = cal.date(byAdding: .day, value: -1, to: date)!
-            return cal.component(.weekday, from: yesterday)
+            return cal.date(byAdding: .day, value: -1, to: date) ?? date
         }
-        return cal.component(.weekday, from: date)
+        return date
+    }
+
+    /// Returns the "plan weekday" for the given date.
+    static func planWeekday(for date: Date) -> Int {
+        Calendar.current.component(.weekday, from: planCalendarDay(for: date))
     }
 
     /// Returns the plan-day date string (yyyy-MM-dd) for a given date.
     static func planDateKey(for date: Date) -> String {
-        let cal = Calendar.current
-        let hour = cal.component(.hour, from: date)
-        let planDate = hour < dayBoundaryHour
-            ? cal.date(byAdding: .day, value: -1, to: date)!
-            : date
-        return DateFormatting.formatDateDash(planDate)
+        DateFormatting.formatDateDash(planCalendarDay(for: date))
     }
 
     /// Returns the slot for the current plan day, checking overrides first.
@@ -92,7 +92,7 @@ struct UsagePlan: Codable, Sendable {
 
     /// Remove overrides older than 8 days.
     mutating func pruneOldOverrides() {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -8, to: .now)!
+        guard let cutoff = Calendar.current.date(byAdding: .day, value: -8, to: .now) else { return }
         let cutoffKey = DateFormatting.formatDateDash(cutoff)
         overrides = overrides.filter { $0.key >= cutoffKey }
     }
@@ -103,6 +103,9 @@ struct UsagePlan: Codable, Sendable {
         guard let slot = todaySlot(at: date), slot.isActive else { return false }
         let cal = Calendar.current
         let hour = cal.component(.hour, from: date)
+
+        // Full 24-hour slot — always active
+        if slot.startHour == slot.endHour { return true }
 
         if hour < Self.dayBoundaryHour {
             // Before day boundary — check if previous day's slot extends past midnight
@@ -127,20 +130,16 @@ struct UsagePlan: Codable, Sendable {
         guard let slot = todaySlot(at: date), slot.isActive else { return nil }
         let cal = Calendar.current
 
-        // Figure out the calendar date of the plan day start
-        let planDate: Date
-        let hour = cal.component(.hour, from: date)
-        if hour < Self.dayBoundaryHour {
-            planDate = cal.date(byAdding: .day, value: -1, to: date)!
-        } else {
-            planDate = date
-        }
+        let planDate = Self.planCalendarDay(for: date)
 
         // Bedtime is endHour on the plan day (or next calendar day if wraps past midnight)
-        var bedtime = cal.date(bySettingHour: slot.endHour, minute: 0, second: 0, of: planDate)!
+        guard var bedtime = cal.date(bySettingHour: slot.endHour, minute: 0, second: 0, of: planDate) else {
+            return nil
+        }
         if slot.endHour <= slot.startHour {
             // End wraps to next calendar day
-            bedtime = cal.date(byAdding: .day, value: 1, to: bedtime)!
+            guard let nextDay = cal.date(byAdding: .day, value: 1, to: bedtime) else { return nil }
+            bedtime = nextDay
         }
 
         return bedtime
@@ -169,10 +168,13 @@ struct UsagePlan: Codable, Sendable {
 
             // Find the active window for this plan day
             let dayStart = dayBoundaryDate(for: cursor)
-            let slotStart = cal.date(bySettingHour: slot.startHour, minute: 0, second: 0, of: dayStart)!
-            var slotEnd = cal.date(bySettingHour: slot.endHour, minute: 0, second: 0, of: dayStart)!
+            guard let slotStart = cal.date(bySettingHour: slot.startHour, minute: 0, second: 0, of: dayStart) else {
+                cursor = nextDayBoundary(after: cursor)
+                continue
+            }
+            var slotEnd = cal.date(bySettingHour: slot.endHour, minute: 0, second: 0, of: dayStart) ?? slotStart
             if slot.endHour <= slot.startHour {
-                slotEnd = cal.date(byAdding: .day, value: 1, to: slotEnd)!
+                slotEnd = cal.date(byAdding: .day, value: 1, to: slotEnd) ?? slotEnd
             }
 
             // Clamp to [now, deadline]
@@ -193,18 +195,14 @@ struct UsagePlan: Codable, Sendable {
     /// Returns the date of the day boundary (5 AM) for the plan day containing `date`.
     private func dayBoundaryDate(for date: Date) -> Date {
         let cal = Calendar.current
-        let hour = cal.component(.hour, from: date)
-        if hour < Self.dayBoundaryHour {
-            let yesterday = cal.date(byAdding: .day, value: -1, to: date)!
-            return cal.date(bySettingHour: Self.dayBoundaryHour, minute: 0, second: 0, of: yesterday)!
-        }
-        return cal.date(bySettingHour: Self.dayBoundaryHour, minute: 0, second: 0, of: date)!
+        let planDate = Self.planCalendarDay(for: date)
+        return cal.date(bySettingHour: Self.dayBoundaryHour, minute: 0, second: 0, of: planDate) ?? planDate
     }
 
     /// Returns the next day boundary (5 AM) after the plan day containing `date`.
     private func nextDayBoundary(after date: Date) -> Date {
         let boundary = dayBoundaryDate(for: date)
-        return Calendar.current.date(byAdding: .day, value: 1, to: boundary)!
+        return Calendar.current.date(byAdding: .day, value: 1, to: boundary) ?? boundary.addingTimeInterval(86400)
     }
 
     // MARK: - Ordered Days

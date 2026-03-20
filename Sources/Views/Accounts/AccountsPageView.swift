@@ -163,7 +163,7 @@ struct AccountsPageView: View {
     }
 
     private func detectCredentials() async {
-        var credentials = KeychainManager.detectAllClaudeCodeCredentials()
+        var credentials = await KeychainManager.detectAllClaudeCodeCredentials()
 
         for i in credentials.indices {
             do {
@@ -296,7 +296,9 @@ private struct AccountRow: View {
                     .help("Link this account to a different keychain entry")
                 } else {
                     Button {
-                        _ = accountStore.refreshTokenFromKeychain(for: account)
+                        Task {
+                            _ = await accountStore.refreshTokenFromKeychain(for: account)
+                        }
                     } label: {
                         Label("Refresh Token", systemImage: "arrow.triangle.2.circlepath")
                             .font(.caption)
@@ -427,7 +429,7 @@ private struct RelinkKeychainView: View {
     }
 
     private func loadCredentials() async {
-        var creds = KeychainManager.detectAllClaudeCodeCredentials()
+        var creds = await KeychainManager.detectAllClaudeCodeCredentials()
         for i in creds.indices {
             do {
                 let profile = try await APIClient.shared.fetchProfile(token: creds[i].accessToken)

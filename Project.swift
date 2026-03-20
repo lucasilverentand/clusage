@@ -8,10 +8,8 @@ let version: String = {
     return "0.0.0"
 }()
 
-/// Read from DEVELOPMENT_TEAM env var. Xcode Automatic signing picks a team
-/// from your Apple ID if this is empty, so local dev works without configuration.
-/// CI passes the team ID via secrets.
-let teamID: SettingValue = "\(ProcessInfo.processInfo.environment["DEVELOPMENT_TEAM"] ?? "")"
+/// CI can override via DEVELOPMENT_TEAM env var; falls back to local team.
+let teamID: SettingValue = "\(ProcessInfo.processInfo.environment["DEVELOPMENT_TEAM"] ?? "96452FLT2P")"
 
 let project = Project(
     name: "Clusage",
@@ -45,6 +43,7 @@ let project = Project(
             settings: .settings(base: [
                 "MARKETING_VERSION": "\(version)",
                 "CURRENT_PROJECT_VERSION": "\(version)",
+                "CODE_SIGN_IDENTITY": "Apple Development",
             ])
         ),
         .target(
@@ -60,7 +59,10 @@ let project = Project(
             ]),
             sources: ["Widgets/**", "Shared/**"],
             entitlements: .file(path: "ClusageWidgets.entitlements"),
-            dependencies: []
+            dependencies: [],
+            settings: .settings(base: [
+                "CODE_SIGN_IDENTITY": "Apple Development",
+            ])
         ),
         .target(
             name: "ClusageTests",
@@ -70,7 +72,10 @@ let project = Project(
             sources: ["Tests/**"],
             dependencies: [
                 .target(name: "Clusage"),
-            ]
+            ],
+            settings: .settings(base: [
+                "CODE_SIGN_IDENTITY": "Apple Development",
+            ])
         ),
     ]
 )

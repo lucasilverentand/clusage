@@ -458,7 +458,7 @@ import Foundation
         } catch let error as APIError where error.is401 {
             // Token expired — try refreshing from the account's bound keychain entry
             Log.poller.info("[\(account.name)] 401 — attempting keychain token refresh")
-            if let freshToken = accountStore.refreshTokenFromKeychain(for: account) {
+            if let freshToken = await accountStore.refreshTokenFromKeychain(for: account) {
                 Log.poller.info("[\(account.name)] Got fresh token from keychain — retrying")
                 do {
                     let result = try await pollWithToken(freshToken, account: account)
@@ -485,7 +485,7 @@ import Foundation
             // Some APIs return 429 for expired tokens, and a re-login may have
             // put a fresh token in the keychain that would succeed immediately.
             let currentToken = accountStore.token(for: account)
-            if let freshToken = accountStore.refreshTokenFromKeychain(for: account),
+            if let freshToken = await accountStore.refreshTokenFromKeychain(for: account),
                freshToken != currentToken {
                 Log.poller.info("[\(account.name)] Rate-limited but keychain has a new token — retrying")
                 do {

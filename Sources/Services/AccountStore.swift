@@ -90,13 +90,13 @@ import Observation
     /// Refresh the token for an account from its bound keychain entry.
     /// Each account must have a `keychainServiceName` — this method only reads from that entry.
     /// Returns the new token if successfully refreshed, nil if the keychain entry is missing.
-    func refreshTokenFromKeychain(for account: Account) -> String? {
+    func refreshTokenFromKeychain(for account: Account) async -> String? {
         guard let serviceName = account.keychainServiceName else {
             Log.accounts.warning("[\(account.displayName)] No keychain binding — cannot refresh token")
             return nil
         }
 
-        guard let credential = KeychainManager.fetchClaudeCodeCredential(serviceName: serviceName) else {
+        guard let credential = await KeychainManager.fetchClaudeCodeCredential(serviceName: serviceName) else {
             Log.accounts.warning("[\(account.displayName)] Keychain entry '\(serviceName)' not found")
             return nil
         }
@@ -115,7 +115,7 @@ import Observation
     /// Refresh tokens from keychain for all accounts that have a keychain binding.
     /// Returns true if any tokens were refreshed.
     @discardableResult
-    func refreshAllFromKeychain() -> Bool {
+    func refreshAllFromKeychain() async -> Bool {
         let boundAccounts = accounts.filter { $0.keychainServiceName != nil }
         guard !boundAccounts.isEmpty else { return false }
 
@@ -124,7 +124,7 @@ import Observation
 
         for account in boundAccounts {
             let oldToken = tokens[account.id.uuidString]
-            if let freshToken = refreshTokenFromKeychain(for: account),
+            if let freshToken = await refreshTokenFromKeychain(for: account),
                freshToken != oldToken {
                 refreshedAny = true
             }

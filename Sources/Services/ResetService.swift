@@ -44,7 +44,8 @@ enum ResetService {
             momentumProvider: momentumProvider
         )
         PollingSettings.resetToDefaults()
-        for account in accountStore.accounts {
+        let accountsToRemove = accountStore.accounts
+        for account in accountsToRemove {
             accountStore.removeAccount(account)
         }
         let ud = UserDefaults.standard

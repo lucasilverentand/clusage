@@ -23,7 +23,18 @@ enum KeychainManager {
     // MARK: - Claude Code Detection
 
     /// Find all Claude Code credential entries using the `security` CLI to avoid keychain prompts.
-    static func detectAllClaudeCodeCredentials() -> [DetectedCredential] {
+    /// Runs the blocking Process calls off the main thread.
+    static func detectAllClaudeCodeCredentials() async -> [DetectedCredential] {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = detectAllClaudeCodeCredentialsSync()
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    /// Synchronous implementation — must be called off the main thread.
+    private static func detectAllClaudeCodeCredentialsSync() -> [DetectedCredential] {
         Log.keychain.debug("Searching for Claude Code keychain items via security CLI")
 
         let serviceNames = findClaudeCodeServiceNames()
@@ -36,7 +47,7 @@ enum KeychainManager {
 
         var credentials: [DetectedCredential] = []
         for serviceName in serviceNames {
-            if let cred = fetchClaudeCodeCredential(serviceName: serviceName) {
+            if let cred = fetchClaudeCodeCredentialSync(serviceName: serviceName) {
                 credentials.append(cred)
             }
         }
@@ -83,7 +94,18 @@ enum KeychainManager {
     }
 
     /// Fetch a single Claude Code credential by service name using `security find-generic-password`.
-    static func fetchClaudeCodeCredential(serviceName: String) -> DetectedCredential? {
+    /// Runs the blocking Process call off the main thread.
+    static func fetchClaudeCodeCredential(serviceName: String) async -> DetectedCredential? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = fetchClaudeCodeCredentialSync(serviceName: serviceName)
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    /// Synchronous implementation — must be called off the main thread.
+    private static func fetchClaudeCodeCredentialSync(serviceName: String) -> DetectedCredential? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         process.arguments = ["find-generic-password", "-s", serviceName, "-w"]

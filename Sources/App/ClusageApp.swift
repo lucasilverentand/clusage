@@ -9,27 +9,29 @@ struct ClusageApp: App {
     @State private var momentumProvider: MomentumProvider?
     @State private var poller: UsagePoller?
 
+    @State private var menuBarViewModel: MenuBarViewModel?
+    @State private var dashboardViewModel: DashboardViewModel?
+    @State private var terminationObserver: NSObjectProtocol?
+
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarView(viewModel: MenuBarViewModel(
-                accountStore: accountStore,
-                poller: poller,
-                momentumProvider: momentumProvider
-            ))
-            .onAppear {
-                Log.app.info("Menu bar popover appeared")
-                if accountStore.accounts.isEmpty {
-                    Log.app.info("No accounts — opening dashboard for onboarding")
-                    openWindow(id: "dashboard")
-                }
+            if let menuBarViewModel {
+                MenuBarView(viewModel: menuBarViewModel)
+                    .onAppear {
+                        Log.app.info("Menu bar popover appeared")
+                        if accountStore.accounts.isEmpty {
+                            Log.app.info("No accounts — opening dashboard for onboarding")
+                            openWindow(id: "dashboard")
+                        }
+                    }
             }
         } label: {
             MenuBarIcon(accountStore: accountStore)
             .task {
                 recordStartupGap()
-                accountStore.refreshAllFromKeychain()
+                await accountStore.refreshAllFromKeychain()
                 startPolling()
                 observeAppLifecycle()
             }
@@ -37,18 +39,12 @@ struct ClusageApp: App {
         .menuBarExtraStyle(.window)
 
         Window("Dashboard", id: "dashboard") {
-            DashboardView(
-                viewModel: DashboardViewModel(
-                    accountStore: accountStore,
-                    historyStore: historyStore,
-                    streakStore: streakStore,
-                    momentumProvider: momentumProvider,
-                    poller: poller
-                )
-            )
-            .onAppear {
-                Log.app.info("Dashboard window opened")
-                NSApp.activate()
+            if let dashboardViewModel {
+                DashboardView(viewModel: dashboardViewModel)
+                    .onAppear {
+                        Log.app.info("Dashboard window opened")
+                        bringDashboardToFront()
+                    }
             }
         }
         .windowResizability(.contentSize)
@@ -63,6 +59,17 @@ struct ClusageApp: App {
             )
             .frame(width: 480, height: 620)
         }
+    }
+
+    /// Bring the dashboard window to the front and activate the app.
+    /// Uses NSWorkspace notification instead of DispatchQueue.main.async.
+    private func bringDashboardToFront() {
+        guard let window = NSApp.windows.first(where: { $0.title == "Dashboard" }) else { return }
+        window.collectionBehavior.insert(.moveToActiveSpace)
+        window.center()
+        window.orderFrontRegardless()
+        window.makeKey()
+        NSApp.activate()
     }
 
     private func recordStartupGap() {
@@ -80,8 +87,6 @@ struct ClusageApp: App {
         UserDefaults.standard.removeObject(forKey: DefaultsKeys.lastQuitAt)
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: DefaultsKeys.lastPollAt)
     }
-
-    @State private var terminationObserver: NSObjectProtocol?
 
     private func observeAppLifecycle() {
         guard terminationObserver == nil else { return }
@@ -118,5 +123,19 @@ struct ClusageApp: App {
         )
         poller = newPoller
         newPoller.start()
+
+        // Create view models once, after services are initialized
+        menuBarViewModel = MenuBarViewModel(
+            accountStore: accountStore,
+            poller: newPoller,
+            momentumProvider: provider
+        )
+        dashboardViewModel = DashboardViewModel(
+            accountStore: accountStore,
+            historyStore: historyStore,
+            streakStore: streakStore,
+            momentumProvider: provider,
+            poller: newPoller
+        )
     }
 }
