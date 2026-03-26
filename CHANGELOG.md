@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.4](https://github.com/lucasilverentand/clusage/compare/v0.1.3...v0.1.4) (2026-03-26)
+
+
+### Features
+
+* improve dashboard cards, chart navigation, and account display ([129dda2](https://github.com/lucasilverentand/clusage/commit/129dda2d8c53622b281ccef009a8426d7eeafd73))
+* polish, parity, and credentials file support ([#4](https://github.com/lucasilverentand/clusage/issues/4)) ([f0c1567](https://github.com/lucasilverentand/clusage/commit/f0c1567745018ad467cba6e4d3663e2e51ba2ea5))
+
 ## [0.1.3](https://github.com/seventwo-studio/clusage/compare/v0.1.2...v0.1.3) (2026-03-16)
 
 
