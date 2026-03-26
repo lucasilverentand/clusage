@@ -16,51 +16,34 @@ struct UnifiedChartView: View {
 
     // Timeline state
     @State private var visibleCenter: Date = .now
-    @State private var visibleSpan: TimeInterval = 3 * 3600
+    @State private var visibleSpan: TimeInterval = 24 * 3600
     @State private var gestureSpanAtStart: TimeInterval = 0
     @State private var gestureCenterAtStart: Date = .distantPast
-    @State private var activePreset: Preset? = .threeHours
+    @State private var isLive = true
 
     private static let maxChartPoints = 500
     private static let minSpan: TimeInterval = 5 * 60
-    private static let maxSpan: TimeInterval = 14 * 86400
+    private static let maxSpan: TimeInterval = 30 * 86400
 
-    // MARK: - Presets
-
-    enum Preset: String, CaseIterable {
-        case threeHours = "3H"
-        case today = "Today"
-        case thisWeek = "This Week"
-    }
-
-    /// The 7-day window boundaries (start...reset).
-    private var currentWindowStart: Date {
-        guard let sevenDay = sevenDayWindow else {
-            return now.addingTimeInterval(-7 * 86400)
-        }
-        return sevenDay.resetsAt.addingTimeInterval(-sevenDay.duration)
-    }
-
-    private var currentWindowEnd: Date {
-        sevenDayWindow?.resetsAt ?? now
-    }
+    // MARK: - Window Helpers
 
     private var windowDuration: TimeInterval {
         sevenDayWindow?.duration ?? 7 * 86400
     }
 
+    private var fiveHourDuration: TimeInterval {
+        fiveHourWindow?.duration ?? 5 * 3600
+    }
+
     // MARK: - Timeline Bounds
 
     private var timelineStart: Date {
-        let earliest = snapshots.first?.timestamp ?? now
-        // Allow navigating one window back from current
-        let oneWindowBack = currentWindowStart.addingTimeInterval(-windowDuration)
-        return min(earliest, oneWindowBack)
+        snapshots.first?.timestamp ?? now.addingTimeInterval(-7 * 86400)
     }
 
     private var timelineEnd: Date {
-        // Extend to the current window reset (for projections/target)
-        return max(now, currentWindowEnd)
+        let windowEnd = sevenDayWindow?.resetsAt ?? now
+        return max(now, windowEnd)
     }
 
     private var totalSpan: TimeInterval {
@@ -87,9 +70,19 @@ struct UnifiedChartView: View {
 
     private var filteredSnapshots: [UsageSnapshot] {
         let range = dateRange
-        let base = snapshots
+        let sorted = snapshots.sorted { $0.timestamp < $1.timestamp }
+
+        // Find the nearest point before and after the visible range so lines
+        // extend to the screen edges instead of starting/ending mid-chart.
+        let leadIn = sorted.last { $0.timestamp < range.lowerBound }
+        let leadOut = sorted.first { $0.timestamp > range.upperBound }
+
+        var base = sorted
             .filter { $0.timestamp >= range.lowerBound && $0.timestamp <= range.upperBound }
-            .sorted { $0.timestamp < $1.timestamp }
+
+        if let leadIn { base.insert(leadIn, at: 0) }
+        if let leadOut { base.append(leadOut) }
+
         guard base.count > Self.maxChartPoints else { return base }
 
         let bucketCount = Self.maxChartPoints
@@ -131,57 +124,129 @@ struct UnifiedChartView: View {
         return result
     }
 
+    // MARK: - Reset Dates in Range
+
+    /// All 7-day reset dates that fall within the visible range.
+    private var sevenDayResetsInRange: [Date] {
+        guard let sevenDay = sevenDayWindow else { return [] }
+        let range = dateRange
+        var resets: [Date] = []
+
+        // Walk backward from the known reset date
+        var cursor = sevenDay.resetsAt
+        while cursor > range.lowerBound {
+            if cursor >= range.lowerBound && cursor <= range.upperBound {
+                resets.append(cursor)
+            }
+            cursor = cursor.addingTimeInterval(-sevenDay.duration)
+        }
+
+        // Walk forward (in case window extends past now)
+        cursor = sevenDay.resetsAt.addingTimeInterval(sevenDay.duration)
+        while cursor <= range.upperBound {
+            if cursor >= range.lowerBound {
+                resets.append(cursor)
+            }
+            cursor = cursor.addingTimeInterval(sevenDay.duration)
+        }
+
+        return resets.sorted()
+    }
+
+    /// All 5-hour reset dates that fall within the visible range (only when zoomed in).
+    private var fiveHourResetsInRange: [Date] {
+        guard visibleSpan < 2 * 86400,
+              let fiveHour = fiveHourWindow
+        else { return [] }
+
+        let range = dateRange
+        var resets: [Date] = []
+
+        var cursor = fiveHour.resetsAt
+        while cursor > range.lowerBound {
+            if cursor >= range.lowerBound && cursor <= range.upperBound {
+                resets.append(cursor)
+            }
+            cursor = cursor.addingTimeInterval(-fiveHour.duration)
+        }
+
+        cursor = fiveHour.resetsAt.addingTimeInterval(fiveHour.duration)
+        while cursor <= range.upperBound {
+            if cursor >= range.lowerBound {
+                resets.append(cursor)
+            }
+            cursor = cursor.addingTimeInterval(fiveHour.duration)
+        }
+
+        return resets.sorted()
+    }
+
+    /// The next upcoming 7-day reset (the one we show projection info on).
+    private var nextSevenDayReset: Date? {
+        guard let resetDate = sevenDayWindow?.resetsAt,
+              resetDate >= dateRange.lowerBound && resetDate <= dateRange.upperBound
+        else { return nil }
+        return resetDate
+    }
+
     // MARK: - Body
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Toolbar
             HStack(spacing: 6) {
-                // Previous window
+                // Zoom controls
                 Button {
-                    withAnimation(.easeInOut(duration: 0.25)) { navigateWindow(direction: -1) }
+                    withAnimation(.easeInOut(duration: 0.2)) { zoom(factor: 0.5) }
                 } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.caption2.weight(.semibold))
+                    Image(systemName: "plus.magnifyingglass")
+                        .font(.caption.weight(.medium))
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel("Previous week")
-                .help("Previous week")
+                .help("Zoom in")
 
-                // Presets
-                ForEach(Preset.allCases, id: \.self) { preset in
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.25)) { applyPreset(preset) }
-                    } label: {
-                        Text(preset.rawValue)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { zoom(factor: 2.0) }
+                } label: {
+                    Image(systemName: "minus.magnifyingglass")
+                        .font(.caption.weight(.medium))
+                }
+                .buttonStyle(.borderless)
+                .help("Zoom out")
+
+                Divider()
+                    .frame(height: 12)
+
+                // Live button
+                Button {
+                    withAnimation(.easeInOut(duration: 0.25)) { snapToLive() }
+                } label: {
+                    HStack(spacing: 3) {
+                        Circle()
+                            .fill(isLive ? .green : .secondary.opacity(0.3))
+                            .frame(width: 6, height: 6)
+                        Text("Live")
                             .font(.system(size: 10, weight: .medium))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 4)
-                            .background(
-                                activePreset == preset
-                                    ? AnyShapeStyle(Color.accentColor)
-                                    : AnyShapeStyle(Color.secondary.opacity(0.1)),
-                                in: RoundedRectangle(cornerRadius: 5)
-                            )
-                            .foregroundStyle(activePreset == preset ? .white : .primary)
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(
+                        isLive
+                            ? AnyShapeStyle(Color.green.opacity(0.1))
+                            : AnyShapeStyle(Color.secondary.opacity(0.06)),
+                        in: RoundedRectangle(cornerRadius: 5)
+                    )
+                    .foregroundStyle(isLive ? .green : .secondary)
                 }
-
-                // Next window
-                Button {
-                    withAnimation(.easeInOut(duration: 0.25)) { navigateWindow(direction: 1) }
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Next week")
-                .help("Next week")
+                .buttonStyle(.plain)
+                .help("Snap to current time")
 
                 Spacer()
 
-                usageStats
+                // Range description
+                Text(rangeDescription(span: visibleSpan))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
 
             // Chart
@@ -197,57 +262,46 @@ struct UnifiedChartView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(chartAccessibilityLabel)
 
-            // Range info
-            HStack {
+            // Legend + stats
+            HStack(spacing: 12) {
                 rangeLabel
                 Spacer()
+                usageStats
             }
         }
-        .onAppear { applyPreset(.threeHours) }
+        .onAppear { snapToLive() }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { date in
             now = date
-            // Keep right edge pinned to now for live presets
-            if activePreset == .threeHours || activePreset == .today {
-                visibleCenter = now.addingTimeInterval(-visibleSpan / 2 + visibleSpan / 2)
+            if isLive {
+                visibleCenter = now
+                clampTimeline()
             }
         }
     }
 
     private var chartAccessibilityLabel: String {
         let count = filteredSnapshots.count
-        let range = dateRange
-        let spanDesc = rangeDescription(span: range.upperBound.timeIntervalSince(range.lowerBound))
+        let spanDesc = rangeDescription(span: visibleSpan)
         let fivePeak = filteredSnapshots.map(\.fiveHourUtilization).max() ?? 0
         let sevenPeak = filteredSnapshots.map(\.sevenDayUtilization).max() ?? 0
         return "Usage history chart, \(spanDesc), \(count) data points. Peak 5-hour \(Int(fivePeak)) percent, peak 7-day \(Int(sevenPeak)) percent"
     }
 
-    // MARK: - Preset Logic
+    // MARK: - Zoom & Navigation
 
-    private func applyPreset(_ preset: Preset) {
-        activePreset = preset
-        switch preset {
-        case .threeHours:
-            visibleSpan = 3 * 3600
-            visibleCenter = now.addingTimeInterval(-visibleSpan / 2 + visibleSpan / 2)
-        case .today:
-            visibleSpan = 24 * 3600
-            visibleCenter = now.addingTimeInterval(-visibleSpan / 2 + visibleSpan / 2)
-        case .thisWeek:
-            visibleSpan = windowDuration
-            let midpoint = currentWindowStart.addingTimeInterval(windowDuration / 2)
-            visibleCenter = midpoint
-        }
+    private func zoom(factor: Double) {
+        visibleSpan = min(max(visibleSpan * factor, Self.minSpan), min(totalSpan, Self.maxSpan))
         clampTimeline()
     }
 
-    private func navigateWindow(direction: Int) {
-        activePreset = nil
-        let offset = Double(direction) * windowDuration
-        visibleSpan = windowDuration
-        let targetStart = currentWindowStart.addingTimeInterval(offset)
-        visibleCenter = targetStart.addingTimeInterval(windowDuration / 2)
+    private func snapToLive() {
+        isLive = true
+        visibleCenter = now
         clampTimeline()
+    }
+
+    private func markNotLive() {
+        isLive = false
     }
 
     // MARK: - Gestures
@@ -261,7 +315,7 @@ struct UnifiedChartView: View {
                 let pixelsPerSecond = 400.0 / visibleSpan
                 let timeOffset = -Double(value.translation.width) / pixelsPerSecond
                 visibleCenter = gestureCenterAtStart.addingTimeInterval(timeOffset)
-                activePreset = nil
+                markNotLive()
                 clampTimeline()
             }
             .onEnded { _ in
@@ -277,7 +331,6 @@ struct UnifiedChartView: View {
                 }
                 let newSpan = gestureSpanAtStart / value.magnification
                 visibleSpan = min(max(newSpan, Self.minSpan), min(totalSpan, Self.maxSpan))
-                activePreset = nil
                 clampTimeline()
             }
             .onEnded { _ in
@@ -290,11 +343,11 @@ struct UnifiedChartView: View {
             let panFraction = delta.x / 400.0
             let timeOffset = -Double(panFraction) * visibleSpan
             visibleCenter = visibleCenter.addingTimeInterval(timeOffset)
+            markNotLive()
         } else {
             let zoomFactor = 1.0 + Double(delta.y) * 0.03
             visibleSpan = min(max(visibleSpan * zoomFactor, Self.minSpan), min(totalSpan, Self.maxSpan))
         }
-        activePreset = nil
         clampTimeline()
     }
 
@@ -320,25 +373,36 @@ struct UnifiedChartView: View {
 
     private var rangeLabel: some View {
         let range = dateRange
-        let span = range.upperBound.timeIntervalSince(range.lowerBound)
         return HStack(spacing: 4) {
             Image(systemName: "clock")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
-            Text(rangeDescription(span: span))
+            Text(dateRangeDescription(range))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
     }
 
+    private func dateRangeDescription(_ range: ClosedRange<Date>) -> String {
+        let formatter = DateFormatter()
+        if visibleSpan < 86400 {
+            formatter.dateFormat = "MMM d, HH:mm"
+        } else {
+            formatter.dateFormat = "MMM d"
+        }
+        return "\(formatter.string(from: range.lowerBound)) – \(formatter.string(from: range.upperBound))"
+    }
+
     private func rangeDescription(span: TimeInterval) -> String {
         if span < 3600 {
-            return "\(Int(span / 60))m window"
+            return "\(Int(span / 60))m"
         } else if span < 86400 {
-            return String(format: "%.1fh window", span / 3600)
+            let hours = span / 3600
+            return hours == hours.rounded() ? "\(Int(hours))h" : String(format: "%.1fh", hours)
         } else {
-            return String(format: "%.1fd window", span / 86400)
+            let days = span / 86400
+            return days == days.rounded() ? "\(Int(days))d" : String(format: "%.1fd", days)
         }
     }
 
@@ -381,10 +445,12 @@ struct UnifiedChartView: View {
     }
 
     private func axisLabel(for date: Date) -> String {
-        if visibleSpan < 86400 * 2 {
+        if visibleSpan < 86400 {
             return date.formatted(.dateTime.hour().minute())
-        } else {
+        } else if visibleSpan < 86400 * 3 {
             return date.formatted(.dateTime.weekday(.abbreviated).hour())
+        } else {
+            return date.formatted(.dateTime.month(.abbreviated).day())
         }
     }
 
@@ -458,13 +524,6 @@ struct UnifiedChartView: View {
         }
 
         return data
-    }
-
-    private var sevenDayResetInRange: Date? {
-        guard let resetDate = sevenDayWindow?.resetsAt,
-              resetDate >= dateRange.lowerBound && resetDate <= dateRange.upperBound
-        else { return nil }
-        return resetDate
     }
 
     private var projectedAtReset: Double? {
@@ -602,41 +661,37 @@ struct UnifiedChartView: View {
                     }
                 }
 
-                // 7-day reset marker
-                if let resetDate = sevenDayResetInRange {
-                    RuleMark(x: .value("Reset", resetDate))
+                // 7-day reset markers
+                ForEach(Array(sevenDayResetsInRange.enumerated()), id: \.offset) { idx, resetDate in
+                    RuleMark(x: .value("7d Reset", resetDate))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                        .foregroundStyle(.purple.opacity(0.5))
+                        .foregroundStyle(.purple.opacity(0.4))
                         .annotation(position: .topLeading, spacing: 4) {
-                            VStack(alignment: .trailing, spacing: 1) {
-                                Text("7d Reset")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .foregroundStyle(.purple)
-                                if let projected = projectedAtReset {
-                                    Text(String(format: "%.0f%%", projected))
-                                        .font(.system(size: 9, weight: .medium).monospacedDigit())
-                                        .foregroundStyle(.purple.opacity(0.7))
-                                }
-                                if let pattern = projection?.patternProjection, pattern.isPatternAware {
-                                    Text(String(format: "%.0f–%.0f%%", pattern.optimisticAtReset, pattern.pessimisticAtReset))
-                                        .font(.system(size: 8, weight: .medium).monospacedDigit())
-                                        .foregroundStyle(.purple.opacity(0.4))
-                                }
-                            }
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
+                            resetAnnotation(for: resetDate, isNext: resetDate == nextSevenDayReset)
                         }
+                }
 
-                    if let projected = projectedAtReset {
-                        PointMark(
-                            x: .value("Reset", resetDate),
-                            y: .value("Projected", projected)
-                        )
-                        .foregroundStyle(.purple.opacity(0.6))
-                        .symbolSize(40)
-                        .symbol(.diamond)
-                    }
+                // 5-hour reset markers (when zoomed in)
+                ForEach(Array(fiveHourResetsInRange.enumerated()), id: \.offset) { _, resetDate in
+                    RuleMark(x: .value("5h Reset", resetDate))
+                        .lineStyle(StrokeStyle(lineWidth: 0.5, dash: [2, 4]))
+                        .foregroundStyle(.blue.opacity(0.25))
+                        .annotation(position: .bottomLeading, spacing: 2) {
+                            Text("5h")
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundStyle(.blue.opacity(0.4))
+                        }
+                }
+
+                // Projected point at next reset
+                if let resetDate = nextSevenDayReset, let projected = projectedAtReset {
+                    PointMark(
+                        x: .value("Reset", resetDate),
+                        y: .value("Projected", projected)
+                    )
+                    .foregroundStyle(.purple.opacity(0.6))
+                    .symbolSize(40)
+                    .symbol(.diamond)
                 }
 
                 // Now marker
@@ -670,7 +725,6 @@ struct UnifiedChartView: View {
                 }
             }
             .chartYScale(domain: 0...max(peakUtilization * 1.1, 10))
-            .chartYAxisLabel("Usage %")
             .chartYAxis {
                 AxisMarks(values: .automatic) { value in
                     AxisGridLine()
@@ -692,6 +746,38 @@ struct UnifiedChartView: View {
                 usageTooltip(snap: snap)
                     .padding(8)
             }
+        }
+    }
+
+    // MARK: - Reset Annotation
+
+    @ViewBuilder
+    private func resetAnnotation(for date: Date, isNext: Bool) -> some View {
+        if isNext {
+            // Full annotation for the upcoming reset
+            HStack(spacing: 4) {
+                Text("7d Reset")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.purple)
+                if let projected = projectedAtReset {
+                    Text(String(format: "%.0f%%", projected))
+                        .font(.system(size: 9, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.purple.opacity(0.7))
+                }
+                if let pattern = projection?.patternProjection, pattern.isPatternAware {
+                    Text(String(format: "%.0f–%.0f%%", pattern.optimisticAtReset, pattern.pessimisticAtReset))
+                        .font(.system(size: 8, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.purple.opacity(0.4))
+                }
+            }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
+        } else {
+            // Minimal label for historical resets
+            Text("7d")
+                .font(.system(size: 8, weight: .medium))
+                .foregroundStyle(.purple.opacity(0.4))
         }
     }
 
@@ -736,13 +822,13 @@ struct UnifiedChartView: View {
     // MARK: - Shared Helpers
 
     private func statItem(_ label: String, value: String, color: Color) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.caption.monospacedDigit().weight(.medium))
-                .foregroundStyle(color)
+        HStack(spacing: 3) {
             Text(label)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption2.monospacedDigit().weight(.medium))
+                .foregroundStyle(color)
         }
     }
 }

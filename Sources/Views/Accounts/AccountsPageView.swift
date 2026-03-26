@@ -47,7 +47,7 @@ struct AccountsPageView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(credential.label)
                                     .font(.body.weight(.medium))
-                                Text(credential.serviceName)
+                                Text(credential.sourceDescription)
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
@@ -412,7 +412,7 @@ private struct RelinkKeychainView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(credential.label)
                                         .font(.body.weight(.medium))
-                                    Text(credential.serviceName)
+                                    Text(credential.sourceDescription)
                                         .font(.caption2)
                                         .foregroundStyle(.tertiary)
                                 }

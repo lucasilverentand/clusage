@@ -15,7 +15,20 @@ struct DetectedCredential: Identifiable, Sendable {
 
     /// Human-readable label derived from metadata.
     var label: String {
-        email ?? serviceName
+        if let email { return email }
+        // Strip the "Claude Code-credentials-" prefix to show just the short ID
+        if serviceName.hasPrefix("Claude Code-credentials-") {
+            return "Claude Code (\(serviceName.dropFirst("Claude Code-credentials-".count)))"
+        }
+        return serviceName
+    }
+
+    /// Where this credential was sourced from (Keychain vs credentials file).
+    var sourceDescription: String {
+        if serviceName == CredentialsFileReader.serviceName {
+            return "Credentials file"
+        }
+        return "Keychain"
     }
 }
 

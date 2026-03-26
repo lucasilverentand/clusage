@@ -130,6 +130,7 @@ struct AccountDetailView: View {
                         momentum: momentum,
                         burstSummary: burstSummary
                     )
+                    .frame(maxWidth: .infinity)
                 }
 
                 if let sevenDay = account.sevenDay {
@@ -137,6 +138,7 @@ struct AccountDetailView: View {
                         window: sevenDay,
                         projection: projection
                     )
+                    .frame(maxWidth: .infinity)
                 }
             }
         } else if let error = account.lastError {
