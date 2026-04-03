@@ -250,12 +250,40 @@ import Observation
             Log.accounts.info("No saved accounts found in UserDefaults")
             return
         }
-        do {
-            accounts = try JSONDecoder().decode([Account].self, from: data)
+
+        // Try decoding the full array first (fast path).
+        if let decoded = try? JSONDecoder().decode([Account].self, from: data) {
+            accounts = decoded
             Log.accounts.info("Loaded \(self.accounts.count) account(s) from UserDefaults")
-        } catch {
-            Log.accounts.error("Failed to decode saved accounts: \(error.localizedDescription)")
+            return
+        }
+
+        // If the array fails, decode element-by-element so one corrupt account
+        // doesn't destroy the entire list.
+        Log.accounts.warning("Array decode failed — attempting per-element recovery")
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            Log.accounts.error("Stored accounts data is not a JSON array — starting fresh")
             accounts = []
+            return
+        }
+
+        let decoder = JSONDecoder()
+        var recovered: [Account] = []
+        for (index, element) in jsonArray.enumerated() {
+            guard let elementData = try? JSONSerialization.data(withJSONObject: element) else { continue }
+            do {
+                recovered.append(try decoder.decode(Account.self, from: elementData))
+            } catch {
+                Log.accounts.error("Skipping corrupt account at index \(index): \(error.localizedDescription)")
+            }
+        }
+
+        accounts = recovered
+        if recovered.count < jsonArray.count {
+            Log.accounts.warning("Recovered \(recovered.count) of \(jsonArray.count) account(s) — re-saving clean data")
+            saveAccounts()
+        } else {
+            Log.accounts.info("Recovered all \(recovered.count) account(s)")
         }
     }
 
