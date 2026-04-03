@@ -116,7 +116,7 @@ enum MomentumEngine {
 
     /// Decay a value toward zero based on how stale the latest snapshot is.
     private static func decayIfStale(_ value: Double, snapshots: [UsageSnapshot]) -> Double {
-        guard let latest = snapshots.last else { return 0 }
+        guard let latest = snapshots.max(by: { $0.timestamp < $1.timestamp }) else { return 0 }
         let age = Date.now.timeIntervalSince(latest.timestamp)
         guard age > 0 else { return value }
         // Exponential decay: halves every `stalenessHalfLife` seconds
