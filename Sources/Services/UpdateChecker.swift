@@ -124,14 +124,21 @@ final class UpdateChecker {
     }
 
     /// Semantic version comparison: returns true if `a` is newer than `b`.
+    /// Strips pre-release suffixes (e.g. "-beta.1") before comparing numeric parts.
     private func isNewer(_ a: String, than b: String) -> Bool {
-        let partsA = a.split(separator: ".").compactMap { Int($0) }
-        let partsB = b.split(separator: ".").compactMap { Int($0) }
+        let partsA = numericVersionParts(a)
+        let partsB = numericVersionParts(b)
         for i in 0..<max(partsA.count, partsB.count) {
             let va = i < partsA.count ? partsA[i] : 0
             let vb = i < partsB.count ? partsB[i] : 0
             if va != vb { return va > vb }
         }
         return false
+    }
+
+    /// Extract numeric version parts, stripping any pre-release suffix (e.g. "1.2.3-beta.1" → [1, 2, 3]).
+    private func numericVersionParts(_ version: String) -> [Int] {
+        let base = version.split(separator: "-", maxSplits: 1).first.map(String.init) ?? version
+        return base.split(separator: ".").compactMap { Int($0) }
     }
 }
