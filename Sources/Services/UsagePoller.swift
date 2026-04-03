@@ -234,6 +234,7 @@ import Foundation
     }
 
     private func startHistoryTimer() {
+        historyTimer?.invalidate()
         let timer = Timer(timeInterval: 300, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in self.recordSnapshots() }
@@ -245,6 +246,7 @@ import Foundation
     /// Safety net: if the poll timer dies for any reason (Task cancellation, runloop issue,
     /// unexpected state), the watchdog restarts it. Checks every 60s.
     private func startWatchdog() {
+        watchdogTimer?.invalidate()
         let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             guard let self else { return }
             guard self.pollState != .paused else { return }
