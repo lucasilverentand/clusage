@@ -82,6 +82,14 @@ struct MonitoringGap: Codable, Identifiable, Sendable {
     private func loadGaps() {
         guard let data = try? Data(contentsOf: gapsFileURL) else { return }
         gaps = (try? JSONDecoder().decode([MonitoringGap].self, from: data)) ?? []
+        let before = gaps.count
+        let cutoff = Date.now.addingTimeInterval(-30 * 24 * 60 * 60)
+        gaps.removeAll { $0.end < cutoff }
+        let pruned = before - gaps.count
+        if pruned > 0 {
+            Log.history.info("Pruned \(pruned) stale gap(s) on load")
+            saveGaps()
+        }
     }
 
     func clearAll() {
