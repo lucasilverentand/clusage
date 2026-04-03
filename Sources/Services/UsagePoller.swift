@@ -461,7 +461,7 @@ import Foundation
                 return PollResult(changed: false, rateLimited: false, retryAfter: nil)
             }
 
-            guard let token = accountStore.token(for: account) else {
+            guard let token = accountStore.token(for: account), !token.isEmpty else {
                 throw APIError.httpError(statusCode: 401, body: "No token stored for account")
             }
 
