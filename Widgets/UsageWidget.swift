@@ -24,7 +24,8 @@ struct UsageTimelineProvider: TimelineProvider {
     }
 
     private func loadWidgetData() -> WidgetData? {
-        guard let data = try? Data(contentsOf: SharedConstants.widgetDataURL) else { return nil }
+        guard let url = SharedConstants.widgetDataURL,
+              let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(WidgetData.self, from: data)
     }
 }

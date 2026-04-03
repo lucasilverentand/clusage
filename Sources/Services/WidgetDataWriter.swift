@@ -24,8 +24,13 @@ struct WidgetDataWriter {
             return
         }
 
+        guard let url = SharedConstants.widgetDataURL else {
+            Log.widget.error("App group container unavailable — cannot write widget data")
+            return
+        }
+
         do {
-            try data.write(to: SharedConstants.widgetDataURL, options: .atomic)
+            try data.write(to: url, options: .atomic)
             Log.widget.debug("Widget data written (\(summaries.count) account(s), \(data.count) bytes)")
         } catch {
             Log.widget.error("Failed to write widget data: \(error.localizedDescription)")
