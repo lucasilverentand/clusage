@@ -250,7 +250,7 @@ import Foundation
             guard self.pollState != .paused else { return }
 
             // If no poll timer is active and we're not paused, something went wrong
-            if self.pollTimer == nil || !self.pollTimer!.isValid {
+            if !(self.pollTimer?.isValid ?? false) {
                 Log.poller.warning("Watchdog: poll timer is dead — restarting (state: \(self.pollState.rawValue))")
                 self.scheduleNextPoll(delay: 5)
                 return
@@ -580,7 +580,7 @@ import Foundation
         // Detect whether utilization changed
         let newUtilization = usage.fiveHour.utilization
         let previous = previousUtilizations[account.id]
-        let changed = previous != nil && abs(newUtilization - previous!) > 0.001
+        let changed = previous.map { abs(newUtilization - $0) > 0.001 } ?? false
         previousUtilizations[account.id] = newUtilization
 
         if changed {
