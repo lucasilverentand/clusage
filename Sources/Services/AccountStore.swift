@@ -181,9 +181,10 @@ import Observation
                 _ = KeychainManager.saveRefreshToken(newRefresh, for: account.id)
             }
 
-            // Update expiry on the account
+            // Update expiry on the account — re-read from store to avoid
+            // overwriting fields changed by other operations in the same poll cycle
             if let expiresIn = response.expiresIn {
-                var updated = account
+                var updated = accounts.first { $0.id == account.id } ?? account
                 updated.tokenExpiresAt = Date().addingTimeInterval(TimeInterval(expiresIn))
                 updateAccount(updated)
             }
