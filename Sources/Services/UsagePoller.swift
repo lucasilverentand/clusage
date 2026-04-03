@@ -646,6 +646,9 @@ import Foundation
     // MARK: - System Events
 
     private func observeSystemEvents() {
+        // Remove any existing observers to prevent duplicates if start() is called twice
+        removeSystemObservers()
+
         let ws = NSWorkspace.shared.notificationCenter
         let dc = DistributedNotificationCenter.default()
 
