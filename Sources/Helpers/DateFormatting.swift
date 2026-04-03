@@ -42,19 +42,19 @@ enum DateFormatting {
 
     // MARK: - Cached DateFormatters
 
-    private static let hourAmPmFormatter: DateFormatter = {
+    nonisolated(unsafe) private static let hourAmPmFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "ha"
         return f
     }()
 
-    private static let hourSpaceAmPmFormatter: DateFormatter = {
+    nonisolated(unsafe) private static let hourSpaceAmPmFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "h a"
         return f
     }()
 
-    private static let dateDashFormatter: DateFormatter = {
+    nonisolated(unsafe) private static let dateDashFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         return f
