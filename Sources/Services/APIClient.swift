@@ -48,11 +48,17 @@ actor APIClient {
         request.setValue("Clusage/\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown")", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 15
 
-        let body = [
-            "grant_type=refresh_token",
-            "refresh_token=\(refreshToken)",
-            "client_id=\(Self.claudeOAuthClientID)",
-        ].joined(separator: "&")
+        let params = [
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": Self.claudeOAuthClientID,
+        ]
+        let body = params
+            .map { key, value in
+                let encodedValue = value.addingPercentEncoding(withAllowedCharacters: .urlQueryValueAllowed) ?? value
+                return "\(key)=\(encodedValue)"
+            }
+            .joined(separator: "&")
         request.httpBody = Data(body.utf8)
 
         Log.api.debug("Refreshing access token via OAuth")
@@ -154,4 +160,13 @@ enum APIError: LocalizedError {
         if case .httpError(let code, _) = self { return code == 401 }
         return false
     }
+}
+
+private extension CharacterSet {
+    /// Characters allowed in a URL query parameter *value* (excludes &, =, +).
+    static let urlQueryValueAllowed: CharacterSet = {
+        var cs = CharacterSet.urlQueryAllowed
+        cs.remove(charactersIn: "&=+")
+        return cs
+    }()
 }
