@@ -558,17 +558,23 @@ import Foundation
         }
     }
 
+    /// Clamp utilization to 0...100 at the API boundary. Guards against NaN,
+    /// negative values, or >100 responses that would corrupt downstream calculations.
+    private static func clampUtilization(_ value: Double) -> Double {
+        value.isNaN ? 0 : min(max(value, 0), 100)
+    }
+
     private func pollWithToken(_ token: String, account: Account) async throws -> PollResult {
         let usage = try await apiClient.fetchUsage(token: token)
 
         var updated = account
         updated.fiveHour = UsageWindow(
-            utilization: usage.fiveHour.utilization,
+            utilization: Self.clampUtilization(usage.fiveHour.utilization),
             resetsAt: DateFormatting.parseISO8601(usage.fiveHour.resetsAt) ?? .now,
             duration: UsageWindow.fiveHourDuration
         )
         updated.sevenDay = UsageWindow(
-            utilization: usage.sevenDay.utilization,
+            utilization: Self.clampUtilization(usage.sevenDay.utilization),
             resetsAt: DateFormatting.parseISO8601(usage.sevenDay.resetsAt) ?? .now,
             duration: UsageWindow.sevenDayDuration
         )
