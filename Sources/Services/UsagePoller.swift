@@ -546,7 +546,8 @@ import Foundation
             let profile = try await apiClient.fetchProfile(token: token)
             if profile.account.email != expectedEmail {
                 Log.poller.error("[\(account.name, privacy: .private)] Token email mismatch — clearing token")
-                var updated = account
+                // Re-read from store to avoid overwriting usage data saved by pollWithToken
+                var updated = accountStore.accounts.first { $0.id == account.id } ?? account
                 updated.lastError = "Token belongs to \(profile.account.email), not \(expectedEmail). Re-link this account to the correct keychain entry."
                 // Clear the bad token so we don't keep using it
                 accountStore.updateToken("", for: account)
