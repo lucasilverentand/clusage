@@ -754,6 +754,7 @@ import Foundation
 
     private func resume() {
         guard pollState == .paused else { return }
+        let wasSystemSleep = pausedForSystemSleep
         if pausedForSystemSleep, let start = pausedAt {
             let gap = MonitoringGap(start: start, end: Date())
             historyStore.addGap(gap)
@@ -774,7 +775,9 @@ import Foundation
             Self.clearRateLimitCooldown()
             pollState = .normal
             unchangedCycles = 0
-            scheduleNextPoll(delay: 0)
+            // Short delay after system sleep to let the network settle (WiFi reconnect, VPN, etc.)
+            // Avoids a doomed first poll that increments failure counts and enters backoff.
+            scheduleNextPoll(delay: wasSystemSleep ? 5 : 0)
         }
     }
 
