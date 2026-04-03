@@ -97,6 +97,7 @@ struct ClusageApp: App {
         guard terminationObserver == nil else { return }
         let pollerRef = poller
         let historyRef = historyStore
+        let streakRef = streakStore
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil, queue: .main
@@ -106,6 +107,7 @@ struct ClusageApp: App {
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: DefaultsKeys.lastQuitAt)
             historyRef.save()
             historyRef.saveGaps()
+            streakRef.save()
         }
     }
 
