@@ -274,9 +274,3 @@ struct SchedulePageView: View {
     }
 
 }
-
-// MARK: - Int Identifiable (kept for other uses)
-
-extension Int: @retroactive Identifiable {
-    public var id: Int { self }
-}
