@@ -16,11 +16,11 @@ struct PollingSettings: Sendable {
         let ud = UserDefaults.standard
         var settings = PollingSettings()
         let active = ud.double(forKey: activeKey)
-        if active > 0 { settings.activeInterval = active }
+        if active > 0 { settings.activeInterval = min(max(active, 30), 300) }
         let normal = ud.double(forKey: normalKey)
-        if normal > 0 { settings.normalInterval = normal }
+        if normal > 0 { settings.normalInterval = min(max(normal, 60), 600) }
         let idle = ud.double(forKey: idleKey)
-        if idle > 0 { settings.idleInterval = idle }
+        if idle > 0 { settings.idleInterval = min(max(idle, 120), 1800) }
         return settings
     }
 
