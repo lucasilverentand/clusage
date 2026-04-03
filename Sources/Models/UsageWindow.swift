@@ -10,7 +10,7 @@ struct UsageWindow: Codable, Sendable {
     }
 
     var elapsedFraction: Double {
-        1 - (remainingTime / duration)
+        min(max(1 - (remainingTime / duration), 0), 1)
     }
 
     /// Utilization as 0…1 for gauges and progress bars.
