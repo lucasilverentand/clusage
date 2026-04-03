@@ -567,7 +567,9 @@ import Foundation
     private func pollWithToken(_ token: String, account: Account) async throws -> PollResult {
         let usage = try await apiClient.fetchUsage(token: token)
 
-        var updated = account
+        // Re-read from the store to pick up any changes made by selfRefreshToken
+        // (e.g. tokenExpiresAt) that would otherwise be overwritten by the stale copy.
+        var updated = accountStore.accounts.first { $0.id == account.id } ?? account
         updated.fiveHour = UsageWindow(
             utilization: Self.clampUtilization(usage.fiveHour.utilization),
             resetsAt: DateFormatting.parseISO8601(usage.fiveHour.resetsAt) ?? .now,
