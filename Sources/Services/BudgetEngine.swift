@@ -39,6 +39,11 @@ enum BudgetEngine {
     }
 
     /// Calculate today's usage target based on the 7-day window and the usage plan.
+    ///
+    /// Targets are cycle-aware: the window start is derived from `resetsAt - duration`,
+    /// and ideal utilisation at any moment equals the fraction of active hours elapsed
+    /// within the full 7-day cycle. This means the target starts near 0% right after a
+    /// reset instead of jumping to the current 7-day utilisation.
     static func calculateTarget(
         sevenDayWindow: UsageWindow,
         plan: UsagePlan,
@@ -48,11 +53,11 @@ enum BudgetEngine {
         guard plan.isEnabled else { return nil }
 
         let current7Day = sevenDayWindow.utilization
-        let totalBudget = max(100 - current7Day, 0)
         let resetDate = sevenDayWindow.resetsAt
+        let windowStart = resetDate.addingTimeInterval(-sevenDayWindow.duration)
 
         // Already at or above 100% — nothing left to budget
-        if totalBudget <= 0 {
+        if current7Day >= 100 {
             let slot = plan.todaySlot(at: now) ?? DaySlot()
             return DailyTarget(
                 targetUtilization: current7Day,
@@ -86,17 +91,25 @@ enum BudgetEngine {
         guard let bedtime = plan.bedtime(for: now) else { return nil }
         let hoursUntilBedtime = max(bedtime.timeIntervalSince(now) / TimeConstants.hour, 0)
 
+        // Total active hours across the full 7-day cycle
+        let totalCycleActiveHours = plan.activeHoursRemaining(until: resetDate, from: windowStart)
+        guard totalCycleActiveHours > 0 else { return nil }
+
+        let budgetPerActiveHour = 100.0 / totalCycleActiveHours
+
+        // Ideal utilisation right now based on cycle position
+        let elapsedActiveHours = plan.activeHoursRemaining(until: now, from: windowStart)
+        let currentTarget = min(budgetPerActiveHour * elapsedActiveHours, 100)
+
+        // Ideal utilisation at bedtime tonight
+        let activeHoursAtBedtime = plan.activeHoursRemaining(until: bedtime, from: windowStart)
+        let targetUtilization = min(budgetPerActiveHour * activeHoursAtBedtime, 100)
+
         // After bedtime — cap at end-of-schedule target
         guard hoursUntilBedtime > 0.1 else {
-            // Calculate what the end-of-day target would have been
-            let totalActiveHoursForCap = plan.activeHoursRemaining(until: resetDate, from: now)
-            let budgetPerHourCap = totalActiveHoursForCap > 0 ? totalBudget / totalActiveHoursForCap : totalBudget
-            let slotHours = Double(slot.activeHours)
-            let endOfDayTarget = min(current7Day + budgetPerHourCap * slotHours, 100)
-
             return DailyTarget(
-                targetUtilization: endOfDayTarget,
-                currentTarget: endOfDayTarget,
+                targetUtilization: targetUtilization,
+                currentTarget: targetUtilization,
                 remainingBudget: 0,
                 hoursUntilBedtime: 0,
                 suggestedPace: 0,
@@ -107,25 +120,10 @@ enum BudgetEngine {
             )
         }
 
-        // Calculate total active hours from now until the 7-day window resets
-        let totalActiveHours = plan.activeHoursRemaining(until: resetDate, from: now)
-        guard totalActiveHours > 0 else { return nil }
+        // Remaining budget: how much more can be used to reach tonight's target
+        let remainingBudget = max(targetUtilization - current7Day, 0)
 
-        // Budget per active hour
-        let budgetPerHour = totalBudget / totalActiveHours
-
-        // Full-day allocation = budget rate * total active hours in today's slot
-        let todayFullBudget = min(budgetPerHour * Double(slot.activeHours), totalBudget)
-        let targetUtilization = min(current7Day + todayFullBudget, 100)
-
-        // How far through the slot we are
-        let hoursIntoSlot = max(Double(slot.activeHours) - hoursUntilBedtime, 0)
-        let currentTarget = min(current7Day + budgetPerHour * hoursIntoSlot, 100)
-
-        // Remaining budget from now until bedtime
-        let remainingBudget = min(budgetPerHour * hoursUntilBedtime, totalBudget)
-
-        // Suggested pace
+        // Suggested pace to spread remaining budget evenly until bedtime
         let suggestedPace = hoursUntilBedtime > 0 ? remainingBudget / hoursUntilBedtime : 0
 
         // Determine status by comparing current velocity to the suggested pace.
