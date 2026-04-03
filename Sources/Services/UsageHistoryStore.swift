@@ -101,5 +101,12 @@ struct MonitoringGap: Codable, Identifiable, Sendable {
     private func loadSnapshots() {
         guard let data = try? Data(contentsOf: fileURL) else { return }
         snapshots = (try? JSONDecoder().decode([UsageSnapshot].self, from: data)) ?? []
+        let before = snapshots.count
+        prune()
+        let pruned = before - snapshots.count
+        if pruned > 0 {
+            Log.history.info("Pruned \(pruned) stale snapshot(s) on load")
+            save()
+        }
     }
 }
