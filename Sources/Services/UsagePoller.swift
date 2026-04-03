@@ -528,7 +528,8 @@ import Foundation
             failureCounts[account.id] = newCount
             Log.poller.warning("[\(account.name)] Rate-limited (\(newCount) consecutive), Retry-After: \(retryAfter.map { String(format: "%.0f", $0) } ?? "none")")
 
-            var updated = account
+            // Re-read from store to avoid overwriting fields changed by refresh steps
+            var updated = accountStore.accounts.first { $0.id == account.id } ?? account
             updated.lastError = error.localizedDescription
             accountStore.updateAccount(updated)
 
@@ -609,7 +610,8 @@ import Foundation
         failureCounts[account.id] = newCount
         Log.poller.error("[\(account.name)] Poll failed (\(newCount) consecutive): \(error.localizedDescription)")
 
-        var updated = account
+        // Re-read from store to avoid overwriting fields changed by refresh/poll steps
+        var updated = accountStore.accounts.first { $0.id == account.id } ?? account
         updated.lastError = error.localizedDescription
         accountStore.updateAccount(updated)
 
