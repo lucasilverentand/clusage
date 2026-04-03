@@ -364,7 +364,10 @@ enum MomentumEngine {
             burstTimeTotal += (sorted.last?.timestamp ?? .now).timeIntervalSince(active.start)
         }
 
-        let totalTime = sorted.last!.timestamp.timeIntervalSince(sorted.first!.timestamp)
+        guard let first = sorted.first, let last = sorted.last else {
+            return BurstSummary(activeBurst: nil, recentBursts: [], burstRatio: 0, pattern: .steady)
+        }
+        let totalTime = last.timestamp.timeIntervalSince(first.timestamp)
         let burstRatio = totalTime > 0 ? burstTimeTotal / totalTime : 0
         let pattern = BurstSummary.Pattern(burstRatio: burstRatio)
 
