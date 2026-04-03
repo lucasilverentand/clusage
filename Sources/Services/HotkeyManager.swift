@@ -97,7 +97,10 @@ final class HotkeyManager {
     }
 
     private func handleKeyEvent(_ event: NSEvent) {
-        guard !isRecording else { return }
+        if isRecording {
+            recordKey(from: event)
+            return
+        }
         let eventMods = event.modifierFlags.intersection([.control, .option, .command, .shift])
         if event.keyCode == keyCode && eventMods == modifiers {
             onToggleDashboard?()
