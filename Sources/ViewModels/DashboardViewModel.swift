@@ -90,6 +90,7 @@ final class DashboardViewModel {
         } else {
             updated.usagePlan.clearOverride(for: .now)
         }
+        updated.usagePlan.pruneOldOverrides()
         accountStore.updateAccount(updated)
         momentumProvider?.refresh()
     }
