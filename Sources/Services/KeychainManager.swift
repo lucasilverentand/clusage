@@ -82,8 +82,18 @@ enum KeychainManager {
             return []
         }
 
+        // 5-second timeout guard — dump-keychain can hang on corrupted or locked keychains
+        let deadline = Date().addingTimeInterval(5)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        if process.isRunning {
+            process.terminate()
+            Log.keychain.warning("security dump-keychain timed out")
+            return []
+        }
+
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
 
         guard let output = String(data: data, encoding: .utf8) else { return [] }
 
